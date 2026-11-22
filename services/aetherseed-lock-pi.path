@@ -1,0 +1,10 @@
+[Unit]
+Description=AetherSeed Companion - lock the image's pi account, asked for at the unit's screen
+Documentation=https://github.com/kommandantvold-ops/aetherseed-local
+
+[Path]
+PathExists=/run/aetherseed-gui/lock-pi-request
+Unit=aetherseed-lock-pi.service
+
+[Install]
+WantedBy=multi-user.target

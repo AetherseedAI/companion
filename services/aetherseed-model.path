@@ -1,0 +1,13 @@
+# The owner asked at the console for another model (gui/serve.py). The console
+# leaves the model's name in its runtime directory; this root-owned path unit
+# sees it and starts the switch. /run is tmpfs: a request never survives a boot.
+[Unit]
+Description=AetherSeed Companion - a model switch asked for at the console
+Documentation=https://github.com/kommandantvold-ops/aetherseed-local
+
+[Path]
+PathExists=/run/aetherseed-gui/model-request
+Unit=aetherseed-model.service
+
+[Install]
+WantedBy=multi-user.target

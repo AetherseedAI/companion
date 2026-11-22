@@ -1,0 +1,64 @@
+# One more person's root on this unit (gui/people.py): a proxy of their own.
+#
+# aetherseed-proxy@<id>.service serves the root /var/lib/aetherseed-people/<id>
+# on a loopback port of its own (/etc/aetherseed/people/<id>.env). It shares
+# what is the unit's - the build, the model, the library, the tokenizer - and
+# cannot see anyone else's root: the owner's memory, shelf, notes and records,
+# the other members' folders and the passkey records are hidden from it here,
+# by the system, not by a rule the program follows.
+#
+# Made and removed by tools/people.py (as root); not enabled by the installer.
+[Unit]
+Description=AetherSeed Companion - proxy for one more person (%i)
+Documentation=https://github.com/kommandantvold-ops/aetherseed-local
+After=hailo-ollama.service network.target aetherseed-proxy.service
+Wants=hailo-ollama.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=aetherseed
+Group=aetherseed
+WorkingDirectory=/opt/aetherseed
+ExecStart=/opt/aetherseed/venv/bin/python3 /opt/aetherseed/proxy.py
+Environment=HOME=/var/lib/aetherseed-people/%i
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/aetherseed/model.env
+EnvironmentFile=/etc/aetherseed/people/%i.env
+Environment=AETHERSEED_PROXY_BIND=127.0.0.1
+# the one model is shared: one prompt at a time across every root
+RuntimeDirectory=aetherseed aetherseed-session/%i
+RuntimeDirectoryPreserve=yes
+# This person's conversation in progress, in RAM, seen by this proxy alone:
+# /run/aetherseed-session is blank to it except for its own folder.
+Environment=AETHERSEED_SESSION_DIR=/run/aetherseed-session/%i
+TemporaryFileSystem=/run/aetherseed-session:ro
+BindPaths=/run/aetherseed-session/%i
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aetherseed-proxy-%i
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# this person's root, and nobody else's
+TemporaryFileSystem=/var/lib/aetherseed-people:ro
+BindPaths=/var/lib/aetherseed-people/%i
+InaccessiblePaths=-/var/lib/aetherseed/.aetherseed -/var/lib/aetherseed/aetherseed-shelf
+InaccessiblePaths=-/var/lib/aetherseed/aetherseed-workspace -/var/lib/aetherseed/training
+InaccessiblePaths=-/var/lib/aetherseed/cog -/var/lib/aetherseed/haven -/var/lib/aetherseed-keys
+
+[Install]
+WantedBy=multi-user.target

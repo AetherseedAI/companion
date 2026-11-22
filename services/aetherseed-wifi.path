@@ -1,0 +1,10 @@
+[Unit]
+Description=AetherSeed Companion - a home Wi-Fi, asked for at the console
+Documentation=https://github.com/kommandantvold-ops/aetherseed-local
+
+[Path]
+PathExists=/run/aetherseed-gui/wifi-request
+Unit=aetherseed-wifi.service
+
+[Install]
+WantedBy=multi-user.target

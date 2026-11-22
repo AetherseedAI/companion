@@ -1,0 +1,11 @@
+# Root side of the console's model switch (tools/model.py --request): reads the
+# name, removes the request, checks the name against this build's models with a
+# measured ceiling and a file in the store, writes /etc/aetherseed/model.env
+# and restarts the proxies. Refused or failed, the old model keeps serving.
+[Unit]
+Description=AetherSeed Companion - switch the served model
+Documentation=https://github.com/kommandantvold-ops/aetherseed-local
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aetherseed/venv/bin/python3 /opt/aetherseed/tools/model.py --request

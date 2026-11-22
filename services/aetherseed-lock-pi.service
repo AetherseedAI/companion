@@ -1,0 +1,7 @@
+[Unit]
+Description=AetherSeed Companion - lock the image's pi account once the admin's password is checked
+Documentation=https://github.com/kommandantvold-ops/aetherseed-local
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/aetherseed/tools/lock_pi_request.py

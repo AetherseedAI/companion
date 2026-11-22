@@ -1,0 +1,7 @@
+[Unit]
+Description=AetherSeed Companion - save or forget a home Wi-Fi, or scan for one (tools/wifi.py)
+Documentation=https://github.com/kommandantvold-ops/aetherseed-local
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/aetherseed/tools/wifi.py
