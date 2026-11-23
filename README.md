@@ -16,6 +16,14 @@
   <a href="CHANGELOG.md">Changes</a>
 </p>
 
+> **A work in progress.** The Companion is young and still changing week by
+> week: some parts are rough, some will move, and some will not work the way you
+> expect yet. We would love to hear what you find, what breaks, what is unclear
+> and what you wish it did. Open an
+> [issue](https://github.com/AetherseedAI/companion/issues), start a
+> [discussion](https://github.com/AetherseedAI/companion/discussions), or write to
+> contact@aetherseed.ai.
+
 ---
 
 ## What it is
