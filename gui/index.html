@@ -4459,6 +4459,7 @@ input.addEventListener('input', () => {
 
 $('recordBtn').onclick = async () => {
   if (!name) return;
+  viewNext = 'talk';                           // the record is shown in the talk
   $('intro')?.remove();
   const tr = turn(t().recordWho, 'node');
   try {
@@ -5030,14 +5031,24 @@ function goBack() {
 }
 window.addEventListener('hashchange', () => showRoute(hashRoute()));
 $('navBack').addEventListener('click', goBack);
-// a panel opened or closed by the script itself (the callback runs after the
-// script that changed it, so a route being shown has already set `route`)
-const viewWatch = new MutationObserver((changes) => {
+// a panel opened or closed by the script itself. Decided once the whole
+// click has run, not per change: a button that opens one view from inside
+// another hides its own view in one listener and opens the next in another,
+// and between the two the page shows nothing - read then, that was taken
+// for "closed" and went back, and going back closed the new view too.
+let viewSettle = 0;
+var viewNext = null;                           // set by a button whose result shows in the talk
+function settleView() {
+  viewSettle = 0;
+  const next = viewNext; viewNext = null;
   if (!routeReady) return;
-  const opened = changes.map((c) => c.target).find((e) => !e.hidden);
-  if (opened) { const r = routeOf(opened.id); if (r !== route) go(r); return; }
   const mine = ROUTES[route].panel;
-  if (mine && $(mine).hidden) goBack();
+  const opened = VIEWS.find((id) => id !== mine && !$(id).hidden);
+  if (opened) { const r = routeOf(opened); if (r !== route) go(r); return; }
+  if (mine && $(mine).hidden) { if (next && next !== route) go(next); else goBack(); }
+}
+const viewWatch = new MutationObserver(() => {
+  if (routeReady && !viewSettle) viewSettle = setTimeout(settleView, 0);
 });
 VIEWS.forEach((id) => viewWatch.observe($(id), { attributes: true, attributeFilter: ['hidden'] }));
 function routeSync() {                         // the memory view's tabs
