@@ -173,3 +173,48 @@ class TheReport(_Console):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EveryModelsEssays(_Console):
+    """Essays stay in the folder of the model that wrote them. Those of earlier
+    models are listed and read beside the current model's, to compare the same
+    theme across models; they are never changed from here."""
+
+    def setUp(self):
+        super().setUp()
+        self.old = CC.dir_for("qwen3:1.7b")
+        C.write_essay(os.path.join(self.old, "essays"), 1, "qwen3:1.7b", "ecc.two",
+                      "Ecc 4:9-12", "why two are better than one", "Two hold each other up.")
+        C.write_essay(os.path.join(self.old, "essays"), 2, "qwen3:1.7b", "ecc.vanity",
+                      "Ecc 1:2", "what the Preacher means by vanity", "Breath.")
+        with open(os.path.join(self.old, "meta.json"), "w") as f:
+            json.dump({"model": "qwen3:1.7b"}, f)
+        os.makedirs(os.path.join(self.tmp, "empty_model", "essays"))
+
+    def test_status_lists_the_earlier_models(self):
+        st = self.c.status()
+        self.assertEqual([e["n"] for e in st["essays"]], [5])
+        self.assertEqual([(g["model"], [e["n"] for e in g["essays"]]) for g in st["earlier"]],
+                         [("qwen3:1.7b", [1, 2])])
+
+    def test_an_earlier_essay_is_read_only_and_names_its_model(self):
+        d = self.c.essay(1, "qwen3:1.7b")
+        self.assertTrue(d["read_only"])
+        self.assertEqual(d["model"], "qwen3:1.7b")
+        self.assertEqual(d["essay"], "Two hold each other up.")
+        self.assertEqual(d["same_theme"], [{"model": "llama3.2:3b", "n": 5}])
+        mine = self.c.essay(5)
+        self.assertFalse(mine["read_only"])
+        self.assertEqual(mine["same_theme"], [{"model": "qwen3:1.7b", "n": 1}])
+
+    def test_only_known_models_are_read(self):
+        for bad in ("../x", "nobody", "empty_model"):
+            with self.assertRaises(ConsoleError) as e:
+                self.c.essay(1, bad)
+            self.assertEqual(e.exception.code, "none")
+
+    def test_writing_is_the_current_models(self):
+        # essay 2 exists only for the earlier model: nothing here writes to it
+        with self.assertRaises(ConsoleError):
+            self.c.review(2, "A review.")
+        self.assertFalse(os.path.exists(os.path.join(self.old, "reviews")))

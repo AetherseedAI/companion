@@ -3151,8 +3151,9 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             from urllib.parse import urlparse, parse_qs
             from logic.cog_console import ConsoleError
             try:
-                n = int((parse_qs(urlparse(self.path).query).get("n") or ["x"])[0])
-                self._send_json(cog_console().essay(n))
+                q = parse_qs(urlparse(self.path).query)
+                n = int((q.get("n") or ["x"])[0])
+                self._send_json(cog_console().essay(n, (q.get("model") or [None])[0]))
             except ValueError:
                 self._send_json({"error": "an essay number", "code": "n"}, status=400)
             except ConsoleError as e:

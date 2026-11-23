@@ -117,57 +117,119 @@ class CogConsole:
     def _path(self, *parts):
         return os.path.join(self.dir, *parts)
 
-    def _essay_numbers(self):
-        ed = self._path("essays")
+    @staticmethod
+    def _essay_numbers_in(d):
+        ed = os.path.join(d, "essays")
         if not os.path.isdir(ed):
             return []
         return sorted(int(m.group(1)) for m in
                       (re.match(r"(\d+)\.md$", n) for n in os.listdir(ed)) if m)
 
-    def _state(self, n):
-        if os.path.exists(self._path("reviews", "%03d.reflection.json" % n)):
+    def _essay_numbers(self):
+        return self._essay_numbers_in(self.dir)
+
+    @staticmethod
+    def _state_in(d, n):
+        rv = os.path.join(d, "reviews")
+        if os.path.exists(os.path.join(rv, "%03d.reflection.json" % n)):
             return "reflected"
-        if os.path.exists(self._path("reviews", "%03d.reflection.removed.json" % n)):
-            return "removed" if not os.path.exists(self._path("reviews", "%03d.txt" % n)) \
+        if os.path.exists(os.path.join(rv, "%03d.reflection.removed.json" % n)):
+            return "removed" if not os.path.exists(os.path.join(rv, "%03d.txt" % n)) \
                 else "reviewed"
-        if os.path.exists(self._path("reviews", "%03d.txt" % n)):
+        if os.path.exists(os.path.join(rv, "%03d.txt" % n)):
             return "reviewed"
         return "waiting"
 
+    def _state(self, n):
+        return self._state_in(self.dir, n)
+
+    # ---- every model's essays ------------------------------------------------
+    # Each model writes into its own folder (dir_for). The essays of the models
+    # she ran on before stay there; they are listed and read here so they can be
+    # compared with the model she runs now, never changed: a review, a
+    # correction, a reflection or a removal is the current model's.
+    @staticmethod
+    def _model_of(d):
+        try:
+            with open(os.path.join(d, "meta.json"), encoding="utf-8") as f:
+                m = json.load(f).get("model")
+            if isinstance(m, str) and m.strip():
+                return m.strip()
+        except (OSError, ValueError, AttributeError):
+            pass
+        return os.path.basename(d.rstrip(os.sep))
+
+    def _folders(self):
+        """[(model, dir)] of every folder that holds essays: this model first,
+        then the others by name."""
+        out = [(self.model, self.dir)]
+        try:
+            names = sorted(os.listdir(BASE))
+        except OSError:
+            names = []
+        for name in names:
+            d = os.path.join(BASE, name)
+            if os.path.abspath(d) == os.path.abspath(self.dir) or not os.path.isdir(d):
+                continue
+            if self._essay_numbers_in(d):
+                out.append((self._model_of(d), d))
+        return out
+
+    def _dir_of(self, model):
+        if model in (None, "", self.model):
+            return self.dir
+        for m, d in self._folders()[1:]:
+            if m == model:
+                return d
+        raise ConsoleError("none", "no essays by %s" % model, 404)
+
+    def _rows(self, d):
+        C = self._harness()
+        rows = []
+        for n in self._essay_numbers_in(d):
+            theme, body = C.read_essay(d, n)
+            rows.append({"n": n, "theme": theme, "words": len(body.split()),
+                         "state": self._state_in(d, n),
+                         "corrected": os.path.exists(os.path.join(d, "essays", "%03d.corrected.md" % n))})
+        return rows
+
     def status(self):
         C = self._harness()
-        essays = []
-        for n in self._essay_numbers():
-            theme, body = C.read_essay(self.dir, n)
-            essays.append({"n": n, "theme": theme, "words": len(body.split()),
-                           "state": self._state(n),
-                           "corrected": os.path.exists(self._path("essays", "%03d.corrected.md" % n))})
         report = C.report(self.dir) if os.path.isdir(self.dir) else ""
         return {"model": self.model, "running": self._running(),
                 "doing": self._doing if self._running() else None,
                 "stopping": self._running() and os.path.exists(self._path("STOP")),
-                "busy": self.busy(), "essays": essays, "report": report}
+                "busy": self.busy(), "essays": self._rows(self.dir),
+                "earlier": [{"model": m, "essays": self._rows(d)} for m, d in self._folders()[1:]],
+                "report": report}
 
-    def essay(self, n):
+    def essay(self, n, model=None):
         C = self._harness()
-        if n not in self._essay_numbers():
+        d = self._dir_of(model)
+        if n not in self._essay_numbers_in(d):
             raise ConsoleError("none", "no essay %03d" % n, 404)
-        theme, body = C.read_essay(self.dir, n)
-        out = {"n": n, "theme": theme, "essay": body, "state": self._state(n),
-               "corrected": C.read_corrected(self.dir, n), "review": None, "reflection": None}
-        rv = self._path("reviews", "%03d.txt" % n)
+        theme, body = C.read_essay(d, n)
+        out = {"n": n, "theme": theme, "essay": body, "state": self._state_in(d, n),
+               "model": self._model_of(d) if d != self.dir else self.model,
+               "read_only": d != self.dir,
+               "corrected": C.read_corrected(d, n), "review": None, "reflection": None}
+        rv = os.path.join(d, "reviews", "%03d.txt" % n)
         if os.path.exists(rv):
             with open(rv, encoding="utf-8") as f:
                 out["review"] = f.read().strip()
         for name, key in (("%03d.reflection.json", "reflection"),
                           ("%03d.reflection.removed.json", "removed")):
-            p = self._path("reviews", name % n)
+            p = os.path.join(d, "reviews", name % n)
             if os.path.exists(p):
                 with open(p, encoding="utf-8") as f:
                     rec = json.load(f)
                 out[key] = {"text": rec.get("reflection"), "at": rec.get("at"),
                             "episode": ((rec.get("stored") or {}).get("body") or {}).get("stored"),
                             "removed": rec.get("removed")}
+        # the same theme by every model, this essay left out: what to compare it with
+        out["same_theme"] = [{"model": m, "n": k}
+                             for m, fd in self._folders() for k in self._essay_numbers_in(fd)
+                             if not (fd == d and k == n) and C.read_essay(fd, k)[0] == theme]
         return out
 
     # ---- writing -----------------------------------------------------------
