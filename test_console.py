@@ -478,3 +478,30 @@ class TheStewardsOwnShelf(unittest.TestCase):
         self.assertIn("if (p.explains)", HTML)
         self.assertIn("not the document’s", HTML)
 
+
+
+class TheViewWatcher(unittest.TestCase):
+    """A button that opens one view from inside another (the memory chips,
+    Training, the cog loop and the shelf in Notes, the record in Trust) hides
+    its own view in one listener and opens the next in another. The watcher
+    read the page in between, saw nothing open and went back, and going back
+    closed the new view: the buttons seemed to do nothing."""
+
+    def _watcher(self):
+        start = HTML.index("const viewWatch = new MutationObserver")
+        return HTML[start:HTML.index("});", start) + 3]
+
+    def test_it_decides_once_the_click_has_run(self):
+        w = self._watcher()
+        self.assertIn("setTimeout(settleView, 0)", w)
+        self.assertNotIn("goBack", w)
+        self.assertNotIn("changes", w)
+
+    def test_it_reads_the_page_not_the_changes(self):
+        start = HTML.index("function settleView()")
+        body = HTML[start:HTML.index("\n}\n", start)]
+        self.assertIn("VIEWS.find((id) => id !== mine && !$(id).hidden)", body)
+
+    def test_the_record_goes_to_the_talk(self):
+        start = HTML.index("$('recordBtn').onclick")
+        self.assertIn("viewNext = 'talk'", HTML[start:start + 200])
