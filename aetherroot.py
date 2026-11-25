@@ -1175,7 +1175,9 @@ class AetherRoot:
     def retrieve_context(self, user_msg: str, request_mode: str = "factual",
                          report: Optional[Dict] = None, past: bool = True,
                          only_speaker: Optional[str] = None,
-                         exclude_private: bool = False) -> str:
+                         exclude_private: bool = False,
+                         max_chars: Optional[int] = None,
+                         max_retrieved: Optional[int] = None) -> str:
         """Retrieve relevant memories and format as context string.
 
         `request_mode` is what the CURRENT request asked for, and it decides
@@ -1211,7 +1213,9 @@ class AetherRoot:
 
         query_emb = self.embedder.embed(user_msg)
         allowed = visible_modes(request_mode)
-        max_chars = self.config["max_context_chars"]
+        # The block's size is the served model's, unless the turn brings its own
+        # (a turn Claude answers: logic/cloud.LIMITS).
+        max_chars = max_chars or self.config["max_context_chars"]
 
         # The curriculum: what this unit knew before anybody spoke to it.
         # Read-only, and scored by words rather than by the embedder -
@@ -1419,7 +1423,7 @@ class AetherRoot:
         # after the fact is what leaves room for anything else.
         top = []
         if all_memories:
-            want = self.config["max_retrieved"]
+            want = max_retrieved or self.config["max_retrieved"]
             if self.config.get("episode_ranking", "words") == "words":
                 # Turns by their words first, as measured; rings after them,
                 # by the rule before. Merged on one score, the

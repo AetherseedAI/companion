@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from aetherroot import AetherRoot
 from aetherspark import AetherSpark, SafetyGate, TRUST_PERMISSIONS
 from trust_evolution import TrustEvolution
+import intent_detection
 from intent_detection import detect_intent, execute_intent, in_workspace
 from logic.gate_answers import (is_level_question, level_text, refusal_text, todo_text,
                                 blocked_text, request_text, lowest_role_for,
@@ -967,6 +968,11 @@ def cloud_now() -> bool:
     return bool(getattr(_TURN, "cloud", False))
 
 
+# A file read on a turn Claude answers is not cut to what the chip can hold.
+intent_detection.read_chars = lambda: (CLOUD.limits()["file_chars"] if cloud_now()
+                                       else intent_detection.READ_CHARS)
+
+
 def writing_now() -> bool:
     return bool(getattr(_TURN, "writing", False))
 
@@ -1104,6 +1110,15 @@ def call_hailo_chat_unlocked(model: str, messages: list, emit=None) -> tuple:
         raise
     call.done("answered", ai_content)
     return raw, ai_content
+
+
+def call_cloud(model: str, messages: list, emit=None) -> tuple:
+    """Claude's answer to a prompt as it was built, not fitted to the chip:
+    one caller at a time and not while the brake is on, as every model call."""
+    with _MODEL_LOCK:
+        if BRAKE.is_set():
+            raise Braked()
+        return _cloud_reply(model, messages, emit)
 
 
 def _cloud_reply(model: str, messages: list, emit) -> tuple:
@@ -2678,10 +2693,14 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 memory_context = ""
             else:
                 if cloud_now():
+                    # Claude's sizes, not the chip's (logic/cloud.LIMITS).
+                    lim = CLOUD.limits()
                     memory_context = root.retrieve_context(user_msg, request_mode=request_mode,
                                                            report=retrieval,
                                                            past=not file_evidence,
-                                                           exclude_private=True)
+                                                           exclude_private=True,
+                                                           max_chars=lim["memory_chars"],
+                                                           max_retrieved=lim["memory_turns"])
                     _TURN.withheld = int(retrieval.get("withheld") or 0)
                 else:
                     memory_context = root.retrieve_context(user_msg, request_mode=request_mode,
@@ -2749,7 +2768,12 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         # a file read for the question - the file is the evidence, as it is for her long-term memory.
         wm_shown = 0
         if getattr(self, "_wm_turn", None) and not file_evidence:
-            history = as_messages(WORKING.recent(self._wm_turn[0]))
+            if cloud_now():
+                lim = CLOUD.limits()
+                history = as_messages(WORKING.recent(self._wm_turn[0], limit=lim["exchanges"],
+                                                     window_s=lim["window_s"], full=True))
+            else:
+                history = as_messages(WORKING.recent(self._wm_turn[0]))
             if history:
                 messages[-1:-1] = history
                 wm_shown = len(history) // 2
@@ -2769,20 +2793,34 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             # - the training record said she was shown it;
             # - the note explaining its tag stayed in the prompt without it.
             # call_hailo_chat fits again and finds nothing more to drop.
-            messages, budget = enforce_budget(token_counter(model), messages)
-            if getattr(budget, "trimmed", False):
-                print(f"[token-budget] {budget.summary()}", flush=True)
-            sys_i = next((i for i, m in enumerate(messages) if m.get("role") == "system"), None)
-            if sys_i is not None and memory_context:
-                memory_context, trusted_context, retrieval = sent_block.settle(
-                    messages[sys_i]["content"], memory_context, trusted_context, retrieval)
-                if retrieval.get("lines_trimmed"):
-                    messages[sys_i]["content"], gone = sent_block.drop_notes(
-                        messages[sys_i]["content"], memory_context, retrieval.get("tagged"))
-                    print(f"[token-budget] {retrieval['lines_trimmed']} memory line(s) not "
-                          f"sent; read after the turn as not shown"
-                          + (f"; notes left out with them: {', '.join(gone)}" if gone else ""),
+            #
+            # A turn Claude answers goes as it was built: the fit is to the
+            # chip's ceiling, which is not Claude's (logic/cloud.LIMITS). If
+            # Claude does not answer, the same prompt is fitted and the local
+            # model answers it, and what was dropped is read as not shown.
+            answered = None
+            if cloud_now():
+                try:
+                    answered = call_cloud(model, messages, stream)
+                except cloud_mod.CloudError as e:
+                    _TURN.brain, _TURN.cloud_failed, _TURN.cloud = "local", str(e), False
+                    print(f"[cloud] Claude did not answer ({e}); the local model answers",
                           flush=True)
+            if answered is None:
+                messages, budget = enforce_budget(token_counter(model), messages)
+                if getattr(budget, "trimmed", False):
+                    print(f"[token-budget] {budget.summary()}", flush=True)
+                sys_i = next((i for i, m in enumerate(messages) if m.get("role") == "system"), None)
+                if sys_i is not None and memory_context:
+                    memory_context, trusted_context, retrieval = sent_block.settle(
+                        messages[sys_i]["content"], memory_context, trusted_context, retrieval)
+                    if retrieval.get("lines_trimmed"):
+                        messages[sys_i]["content"], gone = sent_block.drop_notes(
+                            messages[sys_i]["content"], memory_context, retrieval.get("tagged"))
+                        print(f"[token-budget] {retrieval['lines_trimmed']} memory line(s) not "
+                              f"sent; read after the turn as not shown"
+                              + (f"; notes left out with them: {', '.join(gone)}" if gone else ""),
+                              flush=True)
             if wm_shown:
                 # What the speaker said a moment ago is evidence for the
                 # answer, as a memory line of it would be; what she said is
@@ -2793,7 +2831,10 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                                                 + said)
                 print(f"[working-memory] {len(said)} of {wm_shown} earlier exchange(s) "
                       f"of this conversation sent with the turn", flush=True)
-            raw_response, ai_content = call_hailo_chat(model, messages, emit=stream)
+            if answered is None:
+                raw_response, ai_content = call_hailo_chat(model, messages, emit=stream)
+            else:
+                raw_response, ai_content = answered
         except Braked as e:
             self._answer_braked(model, stream=stream, user_msg=user_msg, partial=e.partial,
                                 lesson=lesson, speaker=speaker)

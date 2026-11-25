@@ -191,24 +191,34 @@ class WorkingMemory:
                     return self._shown.get(id(t), t[3])
         return None
 
-    def recent(self, speaker: str) -> list:
+    def recent(self, speaker: str, limit=None, window_s=None, full=False) -> list:
         """[(user, reply), ...], oldest first: the last exchanges of `speaker`
         (a speaker, or a speaker's conversation) that run up to now without a
         gap longer than the window. Another conversation's turns in between
         are passed over: until they ended this one, which was
-        right for one screen and wrong for a phone beside it."""
+        right for one screen and wrong for a phone beside it.
+
+        `limit` and `window_s` in place of this model's own, and `full` for
+        the exchanges as they were said and shown rather than cut to what the
+        chip's prompt has room for: a turn Claude answers (logic/cloud.LIMITS)."""
         now = self.clock()
+        limit = limit or self.max_exchanges
+        window_s = window_s or self.window_s
         out = []
         with self._lock:
             edge = now
-            for at, who, user, reply, _when in reversed(self._turns):
+            for t in reversed(self._turns):
+                at, who, user, reply, _when = t
                 if who != speaker:
                     continue
-                if edge - at > self.window_s:
+                if edge - at > window_s:
                     break
+                if full:
+                    user = " ".join(self._said.get(id(t), user).split())
+                    reply = self._shown.get(id(t), reply)
                 out.append((user, reply))
                 edge = at
-                if len(out) >= self.max_exchanges:
+                if len(out) >= limit:
                     break
         out.reverse()
         return out

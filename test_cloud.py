@@ -168,3 +168,123 @@ class WhatSheSaysAboutTheCloud(unittest.TestCase):
         for word in ("Anthropic", "Vault", "this device"):
             self.assertIn(word, line)
         self.assertNotIn("Nothing said to me leaves", line)
+
+
+class ClaudesOwnSizes(unittest.TestCase):
+    """Until 25 Nov 2026 Claude was handed the prompt cut for the chip: some
+    1,900 characters of memory, six exchanges cut to 400 characters each,
+    5,000 characters of a file, and 1,024 tokens to answer in. A turn Claude
+    answers has its own sizes (cloud_mod.LIMITS), which the owner can set in
+    cloud.json; the local model's are untouched."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.op = Opener(sse("Hei"))
+        self.c = cloud_mod.Cloud(self.dir, opener=self.op)
+        self.c.set_key(KEY); self.c.switch(on=True)
+
+    def _own(self, limits):
+        with open(os.path.join(self.dir, cloud_mod.CONFIG_FILE)) as f:
+            c = json.load(f)
+        c["limits"] = limits
+        with open(os.path.join(self.dir, cloud_mod.CONFIG_FILE), "w") as f:
+            json.dump(c, f)
+
+    def test_the_defaults_are_not_the_chips(self):
+        lim = self.c.limits()
+        self.assertEqual(lim, cloud_mod.LIMITS)
+        self.assertGreaterEqual(lim["memory_chars"], 20000)
+        self.assertGreaterEqual(lim["exchanges"], 40)
+        self.assertEqual(self.c.status()["limits"], lim)
+
+    def test_the_owner_sets_them_and_nonsense_is_passed_over(self):
+        self._own({"memory_chars": 6000, "max_tokens": 2000, "exchanges": 0,
+                   "timeout_s": "long", "file_chars": True, "unknown": 5})
+        lim = self.c.limits()
+        self.assertEqual((lim["memory_chars"], lim["max_tokens"]), (6000, 2000))
+        for k in ("exchanges", "timeout_s", "file_chars"):
+            self.assertEqual(lim[k], cloud_mod.LIMITS[k])
+        self.assertNotIn("unknown", lim)
+        self.c.switch(model="claude-haiku-5-5")          # the switch keeps them
+        self.assertEqual(self.c.limits()["memory_chars"], 6000)
+
+    def test_the_answer_and_the_wait_follow_them(self):
+        seen = {}
+        def op(req, timeout):
+            seen["timeout"] = timeout
+            return self.op(req, timeout)
+        self.c._open = op
+        self._own({"max_tokens": 3000, "max_tokens_writing": 9000, "timeout_s": 120})
+        self.c.stream([{"role": "user", "content": "hei"}], lambda _: None)
+        self.assertEqual(json.loads(self.op.req.data)["max_tokens"], 3000)
+        self.assertEqual(seen["timeout"], 120)
+        self.c.stream([{"role": "user", "content": "skriv"}], lambda _: None, writing=True)
+        self.assertEqual(json.loads(self.op.req.data)["max_tokens"], 9000)
+
+    def test_the_conversation_as_it_was_said(self):
+        from logic.working_memory import WorkingMemory, REPLY_MAX
+        now = [1000.0]
+        wm = WorkingMemory(max_exchanges=3, clock=lambda: now[0])
+        long_reply = "word " * 300
+        for i in range(10):
+            wm.add("sam", "question %d" % i, long_reply)
+            now[0] += 60
+        chip = wm.recent("sam")
+        self.assertEqual(len(chip), 3)
+        self.assertLessEqual(len(chip[0][1]), REPLY_MAX + 4)
+        claude = wm.recent("sam", limit=40, window_s=7200, full=True)
+        self.assertEqual([u for u, _ in claude], ["question %d" % i for i in range(10)])
+        self.assertEqual(claude[0][1], long_reply.strip())
+        now[0] += 1800                       # half an hour later
+        self.assertEqual(wm.recent("sam"), [])
+        self.assertEqual(len(wm.recent("sam", limit=40, window_s=7200, full=True)), 10)
+
+    def test_a_file_read_follows_the_turn(self):
+        import intent_detection
+        self.assertEqual(intent_detection.READ_CHARS, 5000)
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy.py"),
+                   encoding="utf-8").read()
+        self.assertIn('CLOUD.limits()["file_chars"] if cloud_now()', src)
+
+    def test_claude_is_sent_the_prompt_as_built(self):
+        # the handler asks Claude before the fit to the chip's ceiling, and
+        # fits only when the local model is the one answering
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxy.py"),
+                   encoding="utf-8").read()
+        h = src[src.index("    def _proxy_chat_augmented"):]
+        ask = h.index("answered = call_cloud(model, messages, stream)")
+        fit = h.index("messages, budget = enforce_budget(token_counter(model), messages)")
+        self.assertLess(ask, fit)
+        self.assertIn("if answered is None:\n                messages, budget = enforce_budget", h)
+        self.assertIn('max_chars=lim["memory_chars"]', h)
+        self.assertIn('max_retrieved=lim["memory_turns"]', h)
+        c = src[src.index("def call_cloud"):src.index("def _cloud_reply")]
+        self.assertIn("_MODEL_LOCK", c)
+        self.assertIn("BRAKE.is_set()", c)
+
+
+class MemoryForClaude(unittest.TestCase):
+    def test_the_block_is_the_turns_size_when_it_brings_one(self):
+        import shutil
+        import aetherroot
+        tmp = tempfile.mkdtemp(prefix="cloudmem-")
+        d = os.path.join(tmp, "aetherroot"); os.makedirs(d)
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump(dict(aetherroot.DEFAULT_CONFIG), f)
+        root = aetherroot.AetherRoot(d)
+        try:
+            for i in range(30):
+                root.store_interaction(
+                    "The greenhouse log for bed %d: tomatoes planted in row %d." % (i, i),
+                    "Noted, bed %d has tomatoes in row %d, and I will remember it." % (i, i))
+            q = "What does the greenhouse log say about the tomatoes?"
+            chip, claude = {}, {}
+            a = root.retrieve_context(q, report=chip)
+            b = root.retrieve_context(q, report=claude, max_chars=24000, max_retrieved=40)
+            self.assertLessEqual(len(a), root.config["max_context_chars"] + 200)
+            self.assertGreater(len(b), len(a) * 2)
+            self.assertGreater(b.count("\n- "), a.count("\n- "))
+            self.assertEqual(root.config["max_context_chars"],
+                             aetherroot.DEFAULT_CONFIG["max_context_chars"])
+        finally:
+            root.close(); shutil.rmtree(tmp, ignore_errors=True)
