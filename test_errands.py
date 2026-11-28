@@ -336,8 +336,49 @@ class EmailReads(_Base):
             self.connectors["email"].run("email_search", {}, {})
 
 
-if __name__ == "__main__":
-    unittest.main()
+class ProtonBridgeOnTheUnit(unittest.TestCase):
+    """Bridge on 127.0.0.1: plain connection, upgraded to TLS when offered,
+    its own certificate not checked. Anything else: TLS, checked."""
+
+    def setUp(self):
+        import imaplib
+        import smtplib
+        from logic import connectors as mod
+        self.mod, self.log = mod, []
+        log = self.log
+
+        class IMAP4:
+            capabilities = ("IMAP4REV1", "STARTTLS")
+            def __init__(self, host, port, timeout=None): log.append(("imap", host, port))
+            def starttls(self, ssl_context=None): log.append(("imap-tls", ssl_context.verify_mode))
+
+        class SMTP:
+            def __init__(self, host, port, timeout=None): log.append(("smtp", host, port))
+            def ehlo(self): pass
+            def has_extn(self, name): return name == "starttls"
+            def starttls(self, context=None): log.append(("smtp-tls", context.verify_mode))
+
+        self._saved = (imaplib.IMAP4, smtplib.SMTP)
+        imaplib.IMAP4, smtplib.SMTP = IMAP4, SMTP
+        self.email = Email(Settings(tempfile.mkdtemp()))
+
+    def tearDown(self):
+        import imaplib
+        import smtplib
+        imaplib.IMAP4, smtplib.SMTP = self._saved
+
+    def test_bridge_ports_on_loopback_are_upgraded_without_a_certificate_check(self):
+        import ssl
+        self.email._imap_connect({"imap_host": "127.0.0.1", "imap_port": 1143})
+        self.email._smtp_connect({"smtp_host": "127.0.0.1", "smtp_port": 1025})
+        self.assertEqual(self.log, [("imap", "127.0.0.1", 1143), ("imap-tls", ssl.CERT_NONE),
+                                    ("smtp", "127.0.0.1", 1025), ("smtp-tls", ssl.CERT_NONE)])
+
+    def test_a_mail_server_off_the_unit_is_checked(self):
+        import ssl
+        self.email._smtp_connect({"smtp_host": "smtp.example.no", "smtp_port": 587})
+        self.assertEqual(self.log[-1], ("smtp-tls", ssl.CERT_REQUIRED))
+        self.assertFalse(Email.loopback("192.168.1.10"))
 
 
 class PlansThatRunOn(_Base):
@@ -400,3 +441,7 @@ class PlansThatRunOn(_Base):
         self.plans.set_status(1, "removed")
         with self.assertRaises(ConnectorError):
             self.plans.set_status(1, "active")
+
+
+if __name__ == "__main__":
+    unittest.main()

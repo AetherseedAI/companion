@@ -32,7 +32,7 @@ THE NETWORK. The firewall (services/nftables.conf) lets the companion's own
 user ask a name server and open HTTPS. Calendar (ICS) and web reads are HTTPS
 and work through it. Email needs IMAP and SMTP (993, 465 or 587), which are
 closed; opening them is the owner's step. Proton Mail Bridge on the unit
-would keep email on 127.0.0.1.
+keeps email on 127.0.0.1 (IMAP 1143, SMTP 1025; docs/proton-bridge.md).
 
 Standard library only: urllib, imaplib, smtplib, email, html.parser.
 """
@@ -391,10 +391,28 @@ class Email:
             raise ConnectorError("the email account is not set up")
         return c, pw
 
+    # Proton Mail Bridge, on the unit: IMAP 1143 and SMTP 1025 on 127.0.0.1,
+    # STARTTLS with a certificate Bridge made for itself. The connection never
+    # leaves the device, so its certificate is not checked; it is upgraded to
+    # TLS whenever Bridge offers it, since Bridge may refuse a login without.
+    @staticmethod
+    def loopback(host):
+        return host in ("127.0.0.1", "localhost", "::1")
+
+    @staticmethod
+    def _loopback_tls():
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
     def _imap_connect(self, c):
         host, port = c["imap_host"], int(c.get("imap_port") or 993)
-        if host in ("127.0.0.1", "localhost") and port != 993:
-            return imaplib.IMAP4(host, port)          # Proton Mail Bridge, on the unit
+        if self.loopback(host) and port != 993:
+            m = imaplib.IMAP4(host, port, timeout=30)
+            if "STARTTLS" in m.capabilities:
+                m.starttls(ssl_context=self._loopback_tls())
+            return m
         return imaplib.IMAP4_SSL(host, port, ssl_context=ssl.create_default_context(), timeout=30)
 
     def _smtp_connect(self, c):
@@ -402,8 +420,13 @@ class Email:
         if port == 465:
             return smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=30)
         s = smtplib.SMTP(host, port, timeout=30)
-        if host not in ("127.0.0.1", "localhost"):
+        if not self.loopback(host):
             s.starttls(context=ssl.create_default_context())
+        else:
+            s.ehlo()
+            if s.has_extn("starttls"):
+                s.starttls(context=self._loopback_tls())
+                s.ehlo()
         return s
 
     def tools(self):
