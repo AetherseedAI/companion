@@ -232,7 +232,8 @@ textarea:focus{outline:none; border-color:var(--accent)}
 .writeBtn{padding:0 14px; font-weight:700}
 .writeBtn[aria-pressed="true"]{background:var(--accent); color:var(--ground); border-color:transparent}
 .cloudSwitch{display:flex; gap:8px; align-items:center; margin:12px 0}
-#errList .cloudSwitch{margin:6px 0}
+#errList .cloudSwitch{margin:6px 0; align-items:flex-start}
+#errList input[type=checkbox]{width:auto; display:inline-block; flex:none; margin-top:4px}
 #errList .cloudSwitch small{color:var(--ink-3)}
 .errGrid{display:grid; grid-template-columns:max-content 1fr; gap:6px 10px; align-items:center; margin:8px 0}
 .errGrid label{font-size:13px; color:var(--ink-2)}
@@ -4484,6 +4485,7 @@ function syncVault() {
   b.textContent = vaulting ? s.vaultOn : s.vault;
   b.setAttribute('aria-pressed', String(vaulting));
   b.title = s.vaultHelp;
+  if (typeof syncErrand === 'function') syncErrand();   // the Errand button follows Claude too
 }
 $('vaultBtn').onclick = () => { vaulting = !vaulting; if (vaulting) errandOn = false; syncVault(); syncErrand(); input.focus(); };
 
