@@ -26,6 +26,10 @@ class FakeCloud:
         return {"on": True, "switched_on": True, "key": True, "key_end": "TEST",
                 "model": "claude-sonnet-5-5", "models": ["claude-sonnet-5-5"]}
 
+    def limits(self):
+        from logic.cloud import LIMITS
+        return dict(LIMITS)
+
     def ask(self, system, turns, tools, max_tokens=0):
         self.asked.append({"system": system, "turns": turns, "tools": [t["name"] for t in tools]})
         return self.script.pop(0) if self.script else {

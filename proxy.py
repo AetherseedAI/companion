@@ -1170,6 +1170,14 @@ def call_cloud(model: str, messages: list, emit=None) -> tuple:
     with _MODEL_LOCK:
         if BRAKE.is_set():
             raise Braked()
+        # An errand (logic/errands.py) is a Claude turn with tools; if it
+        # cannot start, the turn is answered by Claude as a plain message.
+        if errand_now():
+            try:
+                return _errand_reply(model, messages, emit)
+            except cloud_mod.CloudError as e:
+                _TURN.errand_report = {"failed_to_start": str(e)}
+                print(f"[errand] not run ({e}); answered as a turn", flush=True)
         return _cloud_reply(model, messages, emit)
 
 
