@@ -25,7 +25,8 @@ Med eierens egen API-nøkkel fra Anthropic kan Claude svare i stedet for enheten
 - Eieren setter det opp under Denne enheten, deretter Claude: lim inn nøkkelen (den begynner med sk-ant-), trykk Lagre nøkkel, og kryss av for La Claude svare. Nøkkelen skrives inn på hennes egen skjerm eller fra en telefon på hennes eget Wi-Fi, aldri over hjemmenettet, som ikke er kryptert. Den vises aldri igjen; siden viser de fire siste tegnene. Fjern nøkkelen der for å stoppe.
 - Under hvert svar sier konsollen «Claude svarte», eller «Claude svarte ikke: svart her» når Claude ikke kunne nås. Hun svarer alltid: uten nett, eller når Claude er nede, tar enhetens egen brikke over.
 - Hvelvet: mens Claude er på, står en Hvelv-knapp ved tekstfeltet. En melding sendt med Hvelv på blir hjemme. Hun svarer på den her, den lagres privat i dagboken hennes, den tas ikke med i de neste turene, og den sendes aldri til Claude. Når noe er holdt utenfor det som går til Claude, får Claude vite at noe ligger i et privat hvelv hjemme, men ikke hva.
-- Det som går til Claude, er det brikken ellers ville fått: charteret hennes, dagbokslinjene som ikke ligger i hvelvet, og samtalen som pågår. Det beskyttes på veien med HTTPS; hvelvet er for det som ikke skal forlate hjemmet i det hele tatt.
+- Det som går til Claude, er charteret hennes, dagbokslinjene som ikke ligger i hvelvet, og samtalen som pågår. Det beskyttes på veien med HTTPS; hvelvet er for det som ikke skal forlate hjemmet i det hele tatt.
+- Claude får mer av det enn brikken har plass til: mer av minnet hennes, mer av samtalen så langt (opptil 40 utvekslinger, så lenge ingen pause mellom dem er over to timer), mer av en fil hun leser, og plass til et lengre svar. Mer sendt er mer betalt til Anthropic. Eieren kan senke eller heve størrelsene i filen cloud.json ved siden av følgesvennfilen hennes, under «limits». Når brikken svarer, gjelder dens egne størrelser som før.
 
 ## Det enheten svarer på selv
 

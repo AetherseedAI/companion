@@ -40,9 +40,27 @@ API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
 DEFAULT_MODEL = os.environ.get("AETHERSEED_CLAUDE_MODEL", "claude-sonnet-5-5")
 MODEL_CHOICES = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5")
-MAX_TOKENS = 1024
-MAX_TOKENS_WRITING = 4096
-TIMEOUT_S = 60
+MAX_TOKENS = 8192
+MAX_TOKENS_WRITING = 16000
+TIMEOUT_S = 300
+# What a turn answered by Claude may carry. The local model's prompt is cut to
+# what its chip can hold (2,048 tokens on the 4B: some 1,900 characters of
+# memory, six exchanges, 5,000 characters of a file). None of that is Claude's
+# limit, and until 25 Nov 2026 Claude was handed the prompt cut for the chip.
+# The operator, 25 Nov 2026: "remove the context limits when she uses the
+# cloud". These are the sizes instead; each can be set in cloud.json under
+# "limits" by the owner, since every token sent is paid for. The local path is
+# untouched, and a turn Claude does not answer is cut for the chip as before.
+LIMITS = {
+    "memory_chars": 24000,       # the memory block (journal lines, facts, rings)
+    "memory_turns": 40,          # past turns brought back for a question
+    "exchanges": 40,             # earlier exchanges of this conversation
+    "window_s": 7200,            # ... as long as no gap between them is longer
+    "file_chars": 200000,        # of a file read from the workspace
+    "max_tokens": MAX_TOKENS,    # of an answer
+    "max_tokens_writing": MAX_TOKENS_WRITING,
+    "timeout_s": TIMEOUT_S,
+}
 KEY_FILE = "anthropic.key"
 CONFIG_FILE = "cloud.json"
 
@@ -116,10 +134,23 @@ class Cloud:
         c, k = self._config(), self._key()
         return {"on": bool(c.get("on")) and bool(k), "switched_on": bool(c.get("on")),
                 "key": bool(k), "key_end": k[-4:] if k else "",
-                "model": c.get("model") or DEFAULT_MODEL, "models": list(MODEL_CHOICES)}
+                "model": c.get("model") or DEFAULT_MODEL, "models": list(MODEL_CHOICES),
+                "limits": self.limits()}
 
     def ready(self):
         return self.status()["on"]
+
+    def limits(self):
+        """LIMITS, with the owner's own numbers from cloud.json where they are
+        whole and positive."""
+        out = dict(LIMITS)
+        own = self._config().get("limits")
+        if isinstance(own, dict):
+            for k in out:
+                v = own.get(k)
+                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                    out[k] = v
+        return out
 
     def set_key(self, key):
         key = (key or "").strip()
@@ -230,7 +261,9 @@ class Cloud:
         if not st["on"]:
             raise CloudError("not switched on")
         system, turns = self.as_request(messages)
-        body = {"model": st["model"], "max_tokens": MAX_TOKENS_WRITING if writing else MAX_TOKENS,
+        lim = st["limits"]
+        body = {"model": st["model"],
+                "max_tokens": lim["max_tokens_writing"] if writing else lim["max_tokens"],
                 "stream": True, "messages": turns}
         if system:
             body["system"] = system
@@ -241,7 +274,7 @@ class Cloud:
                                               "accept": "text/event-stream"})
         text = []
         try:
-            resp = self._open(req, TIMEOUT_S)
+            resp = self._open(req, lim["timeout_s"])
         except urllib.error.HTTPError as e:
             raise CloudError("HTTP %s" % e.code)
         except Exception as e:

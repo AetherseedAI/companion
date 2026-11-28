@@ -23,7 +23,8 @@ With the owner's own Anthropic API key, Claude can answer instead of the unit's 
 - The owner sets it up under This unit, then Claude: paste the key (it starts with sk-ant-), press Save key, and tick Let Claude answer. The key is typed at her own screen or from a phone on her own Wi-Fi only, never over the home network, which is not encrypted. It is never shown again; the page shows its last four characters. Remove the key there to stop.
 - Under each answer the console says "Claude answered", or "Claude did not answer: answered here" when Claude could not be reached. She always answers: without a network, or with Claude down, the unit's own chip takes over.
 - The vault: while Claude is on, a Vault button sits beside the text box. A message sent with Vault on stays at home. She answers it here, it is kept private in her journal, it is not carried into the next turns, and it is never sent to Claude. When something was left out of what goes to Claude, Claude is told that some things are kept in a private vault at home, and not what they are.
-- What goes to Claude is what the chip would have been given: her charter, the journal lines that are not in the vault, and the talk in progress. It is protected on the way by HTTPS; the vault is for what should not leave home at all.
+- What goes to Claude is her charter, the journal lines that are not in the vault, and the talk in progress. It is protected on the way by HTTPS; the vault is for what should not leave home at all.
+- Claude is given more of it than the chip has room for: more of her memory, more of the talk so far (up to 40 exchanges, as long as no pause between them is over two hours), more of a file she reads, and room for a longer answer. More sent is more paid for to Anthropic. The owner can lower or raise the sizes in the file cloud.json beside her companion file, under "limits". When the chip answers, its own sizes apply as before.
 
 ## What the unit answers itself
 

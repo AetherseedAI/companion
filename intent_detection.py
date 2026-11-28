@@ -549,6 +549,12 @@ def _list_workspace(level="autonomous") -> str:
     return "\n".join(lines)
 
 
+READ_CHARS = 5000
+# How much of a file a read brings. The proxy puts its own rule here: more on a
+# turn Claude answers (logic/cloud.LIMITS), this for the chip.
+read_chars = lambda: READ_CHARS
+
+
 def _read_file(filename: str) -> str:
     """Read a file from the workspace."""
     if not filename:
@@ -570,10 +576,11 @@ def _read_file(filename: str) -> str:
         return f"[ERROR] File not found: {filename}"
 
     try:
+        limit = read_chars()
         with open(path, encoding="utf-8", errors="replace") as f:
-            content = f.read(5001)           # no more than is shown, read
-        if len(content) > 5000:
-            content = content[:5000] + "\n... [truncated]"
+            content = f.read(limit + 1)      # no more than is shown, read
+        if len(content) > limit:
+            content = content[:limit] + "\n... [truncated]"
         return f"File: {path.relative_to(root).as_posix()}\n---\n{content}"
     except Exception as e:
         return f"[ERROR] {e}"

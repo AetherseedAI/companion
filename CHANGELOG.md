@@ -1,5 +1,14 @@
 # Changelog
 
+## 25 Nov 2026
+- **Claude's own sizes.** A turn Claude answers is no longer cut to what the
+  chip can hold: more memory, more of the conversation as it was said, more of
+  a file, a longer answer and a longer wait (`logic/cloud.py`, `LIMITS`; the
+  owner's own numbers in `cloud.json` under `limits`). The local model's sizes
+  are untouched, and a turn Claude does not answer is fitted to the chip as
+  before.
+- **COG panel:** the essays of every model a unit has run on, to compare.
+
 ## 22 Nov 2026
 - **Licence:** PolyForm Strict 1.0.0 in place of the AGPL placeholder: free
   non-commercial use; changes, redistribution and commercial use by written
