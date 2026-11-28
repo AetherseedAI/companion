@@ -166,7 +166,9 @@ class TestWhatTheConsoleRelays(unittest.TestCase):
                           "/aetherseed/workspace/save", "/aetherseed/workspace/mkdir",
                           "/aetherseed/workspace/delete", "/aetherseed/workspace/rename",
                           # Claude with the owner's key, 21 Nov 2026 (owner only)
-                          "/aetherseed/cloud"},
+                          "/aetherseed/cloud",
+                          # the owner's connectors for errands, 28 Nov 2026 (owner only)
+                          "/aetherseed/errands"},
                          "a new POST route reaches the proxy only by being added here on purpose")
         self.assertIn("/aetherseed/shelf", serve.PROXIED_GET)
         self.assertIn("/aetherseed/training", serve.PROXIED_GET)

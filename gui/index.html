@@ -232,6 +232,13 @@ textarea:focus{outline:none; border-color:var(--accent)}
 .writeBtn{padding:0 14px; font-weight:700}
 .writeBtn[aria-pressed="true"]{background:var(--accent); color:var(--ground); border-color:transparent}
 .cloudSwitch{display:flex; gap:8px; align-items:center; margin:12px 0}
+#errList .cloudSwitch{margin:6px 0}
+#errList .cloudSwitch small{color:var(--ink-3)}
+.errGrid{display:grid; grid-template-columns:max-content 1fr; gap:6px 10px; align-items:center; margin:8px 0}
+.errGrid label{font-size:13px; color:var(--ink-2)}
+#errSec details{margin:10px 0}
+#errSec summary{cursor:pointer; font-weight:600}
+.errRecent{font-size:13px; color:var(--ink-2); padding-left:18px}
 #cloudSec select, #cloudSec input[type=password]{width:100%; max-width:420px}
 .hint{max-width:760px; margin:8px auto 0; font-size:12px; color:var(--ink-3); display:flex; gap:14px; flex-wrap:wrap}
 /* The steward's brake: always in sight, one press to stop. */
@@ -495,6 +502,7 @@ button.chip:hover{color:var(--ink); border-color:var(--ink-3)}
   <div class="composer">
     <button type="button" class="writeBtn" id="writeBtn" aria-pressed="false" hidden></button>
     <button type="button" class="writeBtn" id="vaultBtn" aria-pressed="false" hidden></button>
+    <button type="button" class="writeBtn" id="errandBtn" aria-pressed="false" hidden></button>
     <textarea id="input" rows="1" autofocus></textarea>
     <button class="send" id="send"></button>
   </div>
@@ -840,6 +848,35 @@ button.chip:hover{color:var(--ink); border-color:var(--ink-3)}
       <select id="cloudModel"></select>
       <p class="err" id="cloudError" hidden></p>
       <button type="button" id="cloudForget" hidden></button>
+    </section>
+    <section class="sec" id="errSec" hidden>
+      <h2 id="errTitle"></h2>
+      <p class="help" id="errHelp"></p>
+      <p class="help" id="errNow" role="status" aria-live="polite"></p>
+      <div id="errList"></div>
+      <details id="errEmail"><summary id="errEmailTitle"></summary>
+        <p class="help" id="errEmailHelp"></p>
+        <div class="errGrid">
+          <label for="errAddr" data-k="address"></label><input id="errAddr" autocomplete="off" spellcheck="false" maxlength="200">
+          <label for="errUser" data-k="user"></label><input id="errUser" autocomplete="off" spellcheck="false" maxlength="200">
+          <label for="errImap" data-k="imap_host"></label><input id="errImap" autocomplete="off" spellcheck="false" maxlength="200">
+          <label for="errImapPort" data-k="imap_port"></label><input id="errImapPort" inputmode="numeric" maxlength="5">
+          <label for="errSmtp" data-k="smtp_host"></label><input id="errSmtp" autocomplete="off" spellcheck="false" maxlength="200">
+          <label for="errSmtpPort" data-k="smtp_port"></label><input id="errSmtpPort" inputmode="numeric" maxlength="5">
+        </div>
+        <div class="row"><span></span><button type="button" class="send" id="errEmailSave"></button></div>
+        <label class="help" for="errPw" id="errPwLabel"></label>
+        <input id="errPw" type="password" autocomplete="off" maxlength="300">
+        <div class="row"><span id="errPwNow" class="help"></span><button type="button" class="send" id="errPwSave"></button></div>
+      </details>
+      <details id="errCal"><summary id="errCalTitle"></summary>
+        <label class="help" for="errCalUrl" id="errCalLabel"></label>
+        <input id="errCalUrl" type="password" autocomplete="off" spellcheck="false" maxlength="2000">
+        <div class="row"><span id="errCalNow" class="help"></span><button type="button" class="send" id="errCalSave"></button></div>
+      </details>
+      <p class="err" id="errError" hidden></p>
+      <h3 id="errRecentTitle" hidden></h3>
+      <ul class="errRecent" id="errRecent"></ul>
     </section>
     <section class="sec">
       <h2 id="unitOffTitle"></h2>
@@ -3355,6 +3392,28 @@ const T = {
     vault: 'Vault', vaultOn: 'In the vault',
     vaultHelp: 'Vault: this message stays at home. She answers it here, it is kept private in her journal, and it is never sent to Claude.',
     vaultTag: 'in the vault: kept at home',
+    errand: 'Errand', errandOn: 'Errand: on',
+    errandHelp: 'Let Claude use the connectors the owner has switched on (calendar, email, lists, web pages) for this message. Anything that goes out waits for a yes in the console.',
+    errandTag: (e) => `errand: ${e.read || 0} read, ${e.done || 0} done` + (e.waiting ? `, ${e.waiting} waiting for your yes` : '') + (e.failed ? `, ${e.failed} failed` : ''),
+    errandNotRun: 'the errand could not start: answered as a message',
+    errTitle: 'Errands',
+    errHelp: 'With Claude on, she can do errands with what you switch on here: read your calendar and inbox, read web pages, and keep the household lists. Anything that goes out, such as an email, is never done on her word: it waits under AetherSpark, “Waiting for your OK”, and is done exactly as written once you say yes. Every step is written down.',
+    errNow: (d) => (d.claude_on ? '' : 'Claude is off, so no errands run. ') + `${d.today} of ${d.daily_limit} errands today; at most ${d.max_steps} steps each.`,
+    errConn: { web: 'Read web pages', calendar: 'Read your calendar', email: 'Email: read, and send with your yes', lists: 'Household lists' },
+    errKind: { read: 'reads', write: 'changes at home', outward: 'goes out: waits for a yes' },
+    errEmailTitle: 'Email account', errEmailHelp: 'IMAP to read, SMTP to send. For Proton, use Proton Mail Bridge on this unit (127.0.0.1). Gmail and Outlook need an app password. Mail servers are closed by her firewall until you open IMAP and SMTP for her.',
+    errField: { address: 'Address', user: 'Login (if not the address)', imap_host: 'IMAP server', imap_port: 'IMAP port (993)', smtp_host: 'SMTP server', smtp_port: 'SMTP port (465 or 587)' },
+    errSave: 'Save', errPwLabel: 'Password or app password. Set it at her own screen or from her own Wi-Fi; it is never shown again.',
+    errIsSet: 'Set.', errNotSet: 'Not set.',
+    errCalTitle: 'Calendar', errCalLabel: 'Your calendar\'s private address (it begins with https and ends in .ics). Google, Outlook and Proton each offer one under the calendar\'s sharing settings. Anyone with it can read the calendar, so it is kept like a password.',
+    errRecentTitle: 'Last errands',
+    errLine: (x) => ({ errand_started: `${localWhen(x.at)}: ${x.speaker || 'someone'} asked “${x.request || ''}”`,
+                       errand_finished: `${localWhen(x.at)}: done ${x.done || 0}, waiting ${x.waiting || 0}, failed ${x.failed || 0}`,
+                       tool_filed: `${localWhen(x.at)}: ${x.tool} filed as request ${x.request}`,
+                       tool_failed: `${localWhen(x.at)}: ${x.tool} failed: ${x.error || ''}` })[x.action] || x.action,
+    errErrors: { secret_on_unit_only: 'For safety, passwords and private addresses are set only at her own screen or from a phone on her own Wi-Fi.',
+                 calendar_url_https_only: 'The calendar address begins with https.', bad_port: 'A port is a number from 1 to 65535.',
+                 failed: 'That did not work. Try again.' },
     claudeTag: 'Claude answered', claudeDown: 'Claude did not answer: answered here',
     cloudTitle: 'Claude',
     cloudHelp: 'With your own Anthropic API key, Claude answers as her, with her journal - except what is in the vault, which stays at home. You pay Anthropic for what is used; Aetherseed is not a subscription. When Claude cannot be reached, she answers here.',
@@ -3608,8 +3667,10 @@ const T = {
     apReason: 'Reason (needed to approve or decline)',
     apNone: 'Nothing is waiting.', apRecentTitle: 'Answered lately',
     apApprove: 'Approve', apDecline: 'Decline',
-    apTool: { todo_add: 'add to your to-do list', note_write: 'write a note' },
-    apLine: (r, tool) => `${tool}: “${(r.args || [])[0] || ''}” — asked by ${r.speaker || 'someone'} ${localWhen(r.filed_at)}`,
+    apTool: { todo_add: 'add to your to-do list', note_write: 'write a note',
+              'errand:email_send': 'send an email', 'errand:list_add': 'add to a household list',
+              'errand:list_remove': 'remove from a household list' },
+    apLine: (r, tool) => `${tool}: “${apWords(r)}” — asked by ${r.speaker || 'someone'} ${localWhen(r.filed_at)}`,
     apStatus: { approved: 'approved', declined: 'declined', expired: 'expired',
                 failed: 'approved, not done' },
     apNoReason: 'Write a reason first.', apFailed: 'The unit did not do it: ',
@@ -3772,6 +3833,28 @@ const T = {
     vault: 'Hvelv', vaultOn: 'I hvelvet',
     vaultHelp: 'Hvelv: denne meldingen blir hjemme. Hun svarer her, den lagres privat i dagboken hennes, og den sendes aldri til Claude.',
     vaultTag: 'i hvelvet: blir hjemme',
+    errand: 'Ærend', errandOn: 'Ærend: på',
+    errandHelp: 'La Claude bruke koblingene eieren har slått på (kalender, e-post, lister, nettsider) for denne meldingen. Alt som går ut, venter på et ja i konsollen.',
+    errandTag: (e) => `ærend: ${e.read || 0} lest, ${e.done || 0} gjort` + (e.waiting ? `, ${e.waiting} venter på ditt ja` : '') + (e.failed ? `, ${e.failed} feilet` : ''),
+    errandNotRun: 'ærendet kunne ikke starte: besvart som en melding',
+    errTitle: 'Ærender',
+    errHelp: 'Med Claude på kan hun gjøre ærender med det du slår på her: lese kalenderen og innboksen din, lese nettsider og føre husstandens lister. Det som går ut, som en e-post, gjøres aldri på hennes ord: det venter under AetherSpark, «Venter på ditt ja», og gjøres nøyaktig slik det står når du sier ja. Hvert steg skrives ned.',
+    errNow: (d) => (d.claude_on ? '' : 'Claude er av, så ingen ærender kjøres. ') + `${d.today} av ${d.daily_limit} ærender i dag; høyst ${d.max_steps} steg hvert.`,
+    errConn: { web: 'Lese nettsider', calendar: 'Lese kalenderen din', email: 'E-post: lese, og sende med ditt ja', lists: 'Husstandens lister' },
+    errKind: { read: 'leser', write: 'endrer hjemme', outward: 'går ut: venter på ja' },
+    errEmailTitle: 'E-postkonto', errEmailHelp: 'IMAP for å lese, SMTP for å sende. For Proton, bruk Proton Mail Bridge på denne enheten (127.0.0.1). Gmail og Outlook trenger et app-passord. E-postserverne er stengt av brannmuren hennes til du åpner IMAP og SMTP for henne.',
+    errField: { address: 'Adresse', user: 'Brukernavn (hvis ikke adressen)', imap_host: 'IMAP-server', imap_port: 'IMAP-port (993)', smtp_host: 'SMTP-server', smtp_port: 'SMTP-port (465 eller 587)' },
+    errSave: 'Lagre', errPwLabel: 'Passord eller app-passord. Settes ved hennes egen skjerm eller fra hennes eget Wi-Fi; det vises aldri igjen.',
+    errIsSet: 'Satt.', errNotSet: 'Ikke satt.',
+    errCalTitle: 'Kalender', errCalLabel: 'Kalenderens private adresse (den begynner med https og slutter på .ics). Google, Outlook og Proton har hver sin under kalenderens delingsinnstillinger. Alle som har den, kan lese kalenderen, så den holdes som et passord.',
+    errRecentTitle: 'Siste ærender',
+    errLine: (x) => ({ errand_started: `${localWhen(x.at)}: ${x.speaker || 'noen'} ba om «${x.request || ''}»`,
+                       errand_finished: `${localWhen(x.at)}: gjort ${x.done || 0}, venter ${x.waiting || 0}, feilet ${x.failed || 0}`,
+                       tool_filed: `${localWhen(x.at)}: ${x.tool} lagt inn som forespørsel ${x.request}`,
+                       tool_failed: `${localWhen(x.at)}: ${x.tool} feilet: ${x.error || ''}` })[x.action] || x.action,
+    errErrors: { secret_on_unit_only: 'Av sikkerhetshensyn settes passord og private adresser bare ved hennes egen skjerm eller fra en telefon på hennes eget Wi-Fi.',
+                 calendar_url_https_only: 'Kalenderadressen begynner med https.', bad_port: 'En port er et tall fra 1 til 65535.',
+                 failed: 'Det virket ikke. Prøv igjen.' },
     claudeTag: 'Claude svarte', claudeDown: 'Claude svarte ikke: svart her',
     cloudTitle: 'Claude',
     cloudHelp: 'Med din egen API-nøkkel fra Anthropic svarer Claude som henne, med dagboken hennes - unntatt det som ligger i hvelvet, som blir hjemme. Du betaler Anthropic for bruken; Aetherseed er ikke et abonnement. Når Claude ikke kan nås, svarer hun her.',
@@ -4022,8 +4105,10 @@ const T = {
     apReason: 'Grunn (trengs for å godkjenne eller avslå)',
     apNone: 'Ingenting venter.', apRecentTitle: 'Nylig besvart',
     apApprove: 'Godkjenn', apDecline: 'Avslå',
-    apTool: { todo_add: 'legge til i gjøremålslisten', note_write: 'skrive et notat' },
-    apLine: (r, tool) => `${tool}: «${(r.args || [])[0] || ''}» — bedt om av ${r.speaker || 'noen'} ${localWhen(r.filed_at)}`,
+    apTool: { todo_add: 'legge til i gjøremålslisten', note_write: 'skrive et notat',
+              'errand:email_send': 'sende en e-post', 'errand:list_add': 'legge til i en liste',
+              'errand:list_remove': 'fjerne fra en liste' },
+    apLine: (r, tool) => `${tool}: «${apWords(r)}» — bedt om av ${r.speaker || 'noen'} ${localWhen(r.filed_at)}`,
     apStatus: { approved: 'godkjent', declined: 'avslått', expired: 'utløpt',
                 failed: 'godkjent, ikke gjort' },
     apNoReason: 'Skriv en grunn først.', apFailed: 'Enheten gjorde det ikke: ',
@@ -4368,6 +4453,8 @@ function provenance(turnEl, p) {
   if (p.brain === 'claude') tag(s.claudeTag, 'quiet');
   if (p.cloud_failed) tag(s.claudeDown, 'quiet');
   if (p.vault) tag(s.vaultTag, 'quiet');
+  if (p.errand && !p.errand.failed_to_start) tag(s.errandTag(p.errand), p.errand.waiting ? 'flagged' : 'quiet');
+  if (p.errand && p.errand.failed_to_start) tag(s.errandNotRun, 'quiet');
   if (row.children.length) turnEl.root.append(row);
   scroll();
 }
@@ -4398,11 +4485,25 @@ function syncVault() {
   b.setAttribute('aria-pressed', String(vaulting));
   b.title = s.vaultHelp;
 }
-$('vaultBtn').onclick = () => { vaulting = !vaulting; syncVault(); input.focus(); };
+$('vaultBtn').onclick = () => { vaulting = !vaulting; if (vaulting) errandOn = false; syncVault(); syncErrand(); input.focus(); };
+
+// Errands (28 Nov 2026): with Claude on and a connector switched on by the
+// owner, a message sent with Errand on lets Claude use those connectors.
+// Anything outward waits in the approval queue for a yes. Never with Vault.
+let errandOn = false, errandOffer = null;
+function syncErrand() {
+  const b = $('errandBtn'), s = t();
+  b.hidden = !(cloudState && cloudState.on && errandOffer && errandOffer.length);
+  if (b.hidden) errandOn = false;
+  b.textContent = errandOn ? s.errandOn : s.errand;
+  b.setAttribute('aria-pressed', String(errandOn));
+  b.title = s.errandHelp;
+}
+$('errandBtn').onclick = () => { errandOn = !errandOn; if (errandOn) vaulting = false; syncErrand(); syncVault(); input.focus(); };
 
 async function ask(text) {
   if (busy || braked || !name || !text.trim()) return;
-  const asWriting = writing, asVault = vaulting;
+  const asWriting = writing, asVault = vaulting, asErrand = errandOn && !vaulting;
   busy = true; send.disabled = true; $('intro')?.remove();
   turn(t().you, 'you').body.textContent = text;
   const tn = turn(name, 'node');
@@ -4416,6 +4517,7 @@ async function ask(text) {
       body: JSON.stringify({ model: 'llama3.2:3b', stream: true,
                              ...(asWriting ? { aetherseed_writing: true } : {}),
                              ...(asVault ? { aetherseed_vault: true } : {}),
+                             ...(asErrand ? { aetherseed_errand: true } : {}),
                              messages: [{ role: 'user', content: text }] })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -5244,6 +5346,7 @@ function drawUnit() {
   $('modelGo').textContent = s.modelGo;
   loadModels();
   drawCloud();
+  loadErrands();
 }
 // Claude: the owner's own key, set here; the key is never shown again.
 function drawCloud() {
@@ -5286,6 +5389,87 @@ $('cloudKeySave').onclick = async () => {
   if (await cloudPost({ action: 'key', key: k })) $('cloudKey').value = '';
 };
 $('cloudOn').onchange = () => cloudPost({ action: 'switch', on: $('cloudOn').checked });
+
+// ---- Errands: the owner's connectors -----------------------------
+// What a filed errand will do, in words: every field of what will be sent.
+function apWords(r) {
+  const raw = (r.args || [])[0] || '';
+  if (!String(r.tool || '').startsWith('errand:')) return raw;
+  let a; try { a = JSON.parse(raw); } catch { return raw; }
+  if (r.tool === 'errand:email_send') return `to ${a.to} · ${a.subject} · ${a.body}`;
+  if (r.tool === 'errand:list_add' || r.tool === 'errand:list_remove') return `${(a.items || []).join(', ')} · ${a.name}`;
+  return raw;
+}
+let errState = null;
+function drawErrands() {
+  const s = t(), d = errState;
+  $('errSec').hidden = !d;
+  if (!d) return;
+  $('errTitle').textContent = s.errTitle;
+  $('errHelp').textContent = s.errHelp;
+  $('errNow').textContent = s.errNow(d);
+  $('errList').replaceChildren(...d.connectors.map((c) => {
+    const l = document.createElement('label'); l.className = 'cloudSwitch';
+    const box = document.createElement('input'); box.type = 'checkbox'; box.checked = c.on;
+    box.onchange = () => errPost({ action: 'switch', name: c.name, on: box.checked });
+    const nm = document.createElement('span'); nm.textContent = s.errConn[c.name] || c.title;
+    const small = document.createElement('small');
+    small.textContent = ' — ' + c.tools.map((x) => `${x.name} (${s.errKind[x.kind] || x.kind})`).join(', ');
+    nm.append(small); l.append(box, nm); return l;
+  }));
+  const em = d.connectors.find((c) => c.name === 'email') || { settings: {}, secrets: {} };
+  $('errEmailTitle').textContent = s.errEmailTitle; $('errEmailHelp').textContent = s.errEmailHelp;
+  document.querySelectorAll('.errGrid label').forEach((l) => { l.textContent = s.errField[l.dataset.k] || l.dataset.k; });
+  const set = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v == null ? '' : v; };
+  set('errAddr', em.settings.address); set('errUser', em.settings.user);
+  set('errImap', em.settings.imap_host); set('errImapPort', em.settings.imap_port);
+  set('errSmtp', em.settings.smtp_host); set('errSmtpPort', em.settings.smtp_port);
+  $('errEmailSave').textContent = s.errSave; $('errPwSave').textContent = s.errSave;
+  $('errPwLabel').textContent = s.errPwLabel;
+  $('errPwNow').textContent = em.secrets.email_password ? s.errIsSet : s.errNotSet;
+  const cal = d.connectors.find((c) => c.name === 'calendar') || { secrets: {} };
+  $('errCalTitle').textContent = s.errCalTitle; $('errCalLabel').textContent = s.errCalLabel;
+  $('errCalSave').textContent = s.errSave;
+  $('errCalNow').textContent = cal.secrets.calendar_url ? s.errIsSet : s.errNotSet;
+  const rec = d.recent || [];
+  $('errRecentTitle').textContent = s.errRecentTitle; $('errRecentTitle').hidden = !rec.length;
+  $('errRecent').replaceChildren(...rec.slice(0, 12).map((x) => {
+    const li = document.createElement('li'); li.textContent = s.errLine(x); return li;
+  }));
+}
+async function loadErrands() {
+  try {
+    const r = await fetch('/aetherseed/errands');
+    if (!r.ok) throw new Error(String(r.status));
+    errState = await r.json();
+    errandOffer = errState.connectors.filter((c) => c.on).map((c) => c.name); syncErrand();
+  } catch { errState = null; }
+  drawErrands();
+}
+async function errPost(body) {
+  const s = t(), err = $('errError');
+  err.hidden = true;
+  try {
+    const r = await fetch('/aetherseed/errands', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { err.textContent = s.errErrors[d.code] || s.errErrors.failed; err.hidden = false; drawErrands(); return false; }
+    errState = d; errandOffer = d.connectors.filter((c) => c.on).map((c) => c.name);
+    drawErrands(); syncErrand();
+    return true;
+  } catch { err.textContent = s.errErrors.failed; err.hidden = false; return false; }
+}
+$('errEmailSave').onclick = () => errPost({ action: 'settings', name: 'email', settings: {
+  address: $('errAddr').value, user: $('errUser').value, imap_host: $('errImap').value,
+  imap_port: $('errImapPort').value, smtp_host: $('errSmtp').value, smtp_port: $('errSmtpPort').value } });
+$('errPwSave').onclick = async () => {
+  const v = $('errPw').value; if (!v) return;
+  if (await errPost({ action: 'secret', name: 'email_password', value: v })) $('errPw').value = '';
+};
+$('errCalSave').onclick = async () => {
+  const v = $('errCalUrl').value.trim(); if (!v) return;
+  if (await errPost({ action: 'secret', name: 'calendar_url', value: v })) $('errCalUrl').value = '';
+};
 $('cloudModel').onchange = () => cloudPost({ action: 'switch', model: $('cloudModel').value });
 $('cloudForget').onclick = () => cloudPost({ action: 'forget' });
 // The served model: the owner's to switch. The console only asks; the unit's
@@ -6977,6 +7161,7 @@ async function status() {
     lastBounds = d.bounds || null;
     if (lastBounds) $('bounds').textContent = s.bounds(lastBounds);
     writeOffer = d.writing || null; syncWrite();
+    errandOffer = d.errands || null; syncErrand();
     cloudState = d.cloud || null; syncVault();
     if (route === 'unit') drawCloud();
     if (!routeReady) { routeReady = true; showRoute(hashRoute()); }

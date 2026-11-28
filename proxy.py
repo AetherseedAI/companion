@@ -43,6 +43,8 @@ from logic import decline_stop
 from logic import trust_record
 from logic import file_tools
 from logic import cloud as cloud_mod
+from logic import connectors as connectors_mod
+from logic import errands as errands_mod
 from logic import served
 
 # ============================================================
@@ -331,6 +333,8 @@ def _do_approved(request):
     words = (request.get("args") or [""])[0]
     if not words.strip():
         return "[ERROR] nothing to do"
+    if request["tool"].startswith(errands_mod.TOOL_PREFIX):
+        return errands_engine().carry_out(request)
     with in_workspace(_sandbox_root()):
         if request["tool"] == "todo_add":
             return tools["_append_todo"](words)
@@ -971,6 +975,25 @@ def writing_now() -> bool:
     return bool(getattr(_TURN, "writing", False))
 
 
+# Errands (logic/errands.py, 28 Nov 2026): with Claude on, a person may ask
+# for an errand, and Claude may use the connectors the owner has switched on.
+# Anything outward waits in the approval queue for a yes.
+_ERRANDS = {}
+
+
+def errands_engine():
+    folder = os.path.dirname(COMPANION_FILE)
+    if folder not in _ERRANDS:
+        _ERRANDS.clear()
+        settings, conns = connectors_mod.build(folder)
+        _ERRANDS[folder] = errands_mod.Errands(CLOUD, approvals_queue(), conns, settings, folder)
+    return _ERRANDS[folder]
+
+
+def errand_now() -> bool:
+    return bool(getattr(_TURN, "errand", False))
+
+
 # One request to the model at a time. Until only the chat path called
 # the model; now a ring's own sentence is asked for in the background too, and
 # what hailo-ollama does with two overlapping requests on one NPU has not been
@@ -1063,6 +1086,12 @@ def call_hailo_chat_unlocked(model: str, messages: list, emit=None) -> tuple:
     """
     if BRAKE.is_set():
         raise Braked()                       # no model call while the brake is on
+    if cloud_now() and errand_now():
+        try:
+            return _errand_reply(model, messages, emit)
+        except cloud_mod.CloudError as e:
+            _TURN.errand_report = {"failed_to_start": str(e)}
+            print(f"[errand] not run ({e}); answered as a turn", flush=True)
     if cloud_now():
         try:
             return _cloud_reply(model, messages, emit)
@@ -1126,6 +1155,116 @@ def _cloud_reply(model: str, messages: list, emit) -> tuple:
     _TURN.brain = "claude"
     print(f"[cloud] Claude answered ({len(text)} characters)", flush=True)
     return ("\n".join(lines) + "\n").encode(), text
+
+
+def _errand_reply(model: str, messages: list, emit) -> tuple:
+    """An errand (logic/errands.py), returned as one answer in the local
+    model's NDJSON shape. The text Claude wrote, then what the unit itself
+    recorded: what was done, what waits for a yes, what failed."""
+    system = "\n\n".join(m["content"] for m in messages
+                          if m.get("role") == "system" and isinstance(m.get("content"), str))
+    talk = [m for m in messages if m.get("role") in ("user", "assistant")
+            and isinstance(m.get("content"), str) and m["content"].strip()]
+    if not talk or talk[-1]["role"] != "user":
+        raise cloud_mod.CloudError("nothing to ask")
+    level = getattr(getattr(spark, "gate", None), "trust_level", "observer")
+    call = prompts.Call(_prompts_log(), json.dumps({"errand": True, "messages": messages}).encode())
+    report = errands_engine().run(talk[-1]["content"], getattr(_TURN, "speaker", ""), level,
+                                  system=system, history=talk[:-1], vault=bool(getattr(_TURN, "vault", False)))
+    parts = [report["text"] or ""]
+    for label, key in (("Done", "done"), ("Waiting for your yes in the console", "waiting"),
+                       ("Failed", "failed")):
+        if report[key]:
+            parts.append("%s: %s." % (label, "; ".join(report[key])))
+    text = "\n\n".join(p for p in parts if p).strip() or "(no answer)"
+    call.done("errand by Claude", text)
+    _TURN.brain = "claude"
+    _TURN.errand_report = {k: len(report[k]) for k in ("done", "waiting", "failed", "read")}
+    lines = [json.dumps({"model": model, "message": {"role": "assistant", "content": text}, "done": False})]
+    if emit is not None:
+        emit(lines[0])
+    lines.append(json.dumps({"model": model, "message": {"role": "assistant", "content": ""},
+                             "done": True, "done_reason": "stop"}))
+    print(f"[errand] {_TURN.errand_report}", flush=True)
+    return ("\n".join(lines) + "\n").encode(), text
+
+
+ERRAND_SETTINGS = {"email": ("address", "user", "imap_host", "imap_port", "smtp_host", "smtp_port")}
+ERRAND_SECRETS = {"email_password": "email", "calendar_url": "calendar"}
+
+
+def _errands_on():
+    """The connectors the owner has switched on, for the console's Errand button."""
+    try:
+        return errands_engine().enabled()
+    except Exception:
+        return []
+
+
+def _errands_view():
+    """What the console shows: the connectors, which are on, what is set up
+    (never a password or a private address), and the last errands."""
+    e = errands_engine()
+    view = e.status()
+    for c in view["connectors"]:
+        cfg = e.settings.config(c["name"])
+        c["settings"] = {k: cfg.get(k) for k in ERRAND_SETTINGS.get(c["name"], ())}
+        c["secrets"] = {k: bool(e.settings.secret(k)) for k, n in ERRAND_SECRETS.items() if n == c["name"]}
+    recent = []
+    try:
+        with open(e.log, encoding="utf-8") as f:
+            lines = f.readlines()[-200:]
+        for raw in lines:
+            try:
+                x = json.loads(raw)
+            except ValueError:
+                continue
+            if x.get("action") in ("errand_started", "errand_finished", "tool_filed", "tool_failed"):
+                recent.append({k: x.get(k) for k in ("action", "at", "speaker", "request", "tool",
+                                                      "done", "waiting", "failed", "error")
+                               if x.get(k) is not None})
+    except OSError:
+        pass
+    view["recent"] = recent[-30:][::-1]
+    view["claude_on"] = CLOUD.ready()
+    return view
+
+
+def _errands_change(req):
+    e, act, name = errands_engine(), req.get("action"), req.get("name")
+    if act == "switch":
+        if name not in e.connectors:
+            raise ValueError("bad_connector")
+        e.settings.set_config(name, dict(e.settings.config(name), on=req.get("on") is True))
+        print(f"[errands] the owner switched {name} {'on' if req.get('on') is True else 'off'}", flush=True)
+    elif act == "settings":
+        if name not in ERRAND_SETTINGS:
+            raise ValueError("bad_connector")
+        cfg, given = e.settings.config(name), req.get("settings") or {}
+        for k in ERRAND_SETTINGS[name]:
+            if k in given:
+                v = given[k]
+                if k.endswith("_port"):
+                    v = int(v) if str(v).strip() else None
+                    if v is not None and not 0 < v < 65536:
+                        raise ValueError("bad_port")
+                else:
+                    v = " ".join(str(v or "").split())[:200] or None
+                cfg[k] = v
+        e.settings.set_config(name, cfg)
+        print(f"[errands] the owner changed the {name} settings", flush=True)
+    elif act == "secret":
+        if name not in ERRAND_SECRETS:
+            raise ValueError("bad_secret")
+        value = req.get("value")
+        if value is not None and (not isinstance(value, str) or len(value) > 2000):
+            raise ValueError("bad_secret")
+        if name == "calendar_url" and value and not value.startswith("https://"):
+            raise ValueError("calendar_url_https_only")
+        e.settings.set_secret(name, value or None)
+        print(f"[errands] the owner {'set' if value else 'removed'} {name}", flush=True)
+    else:
+        raise ValueError("bad_action")
 
 
 def _stream_reply(model: str, messages: list, emit, data: bytes) -> tuple:
@@ -1461,6 +1600,8 @@ def _terminator(raw: bytes, model: str, provenance: dict) -> str:
         provenance["cloud_failed"] = True
     if getattr(_TURN, "vault", False):
         provenance["vault"] = True
+    if getattr(_TURN, "errand_report", None):
+        provenance["errand"] = _TURN.errand_report
     last["aetherseed"] = provenance
     return json.dumps(last)
 
@@ -2219,6 +2360,9 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         # the journal, never in the conversation sent with a later turn.
         _TURN.vault = req.get("aetherseed_vault") is True and lesson is None
         _TURN.cloud = (lesson is None and not _TURN.vault and CLOUD.ready())
+        # An errand: only a person's own turn, only with Claude on, never Vault.
+        _TURN.errand = req.get("aetherseed_errand") is True and _TURN.cloud
+        _TURN.errand_report = None
         _TURN.brain, _TURN.cloud_failed, _TURN.withheld = "local", None, 0
         if _TURN.writing:
             print(f"[writing] this turn: up to {WRITING_TOKENS} tokens, "
@@ -2229,8 +2373,8 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             with in_workspace(lesson["workspace"]):
                 return self._chat_turn(body, lesson)
         finally:
-            _TURN.writing = _TURN.vault = _TURN.cloud = False
-            _TURN.cloud_failed = None
+            _TURN.writing = _TURN.vault = _TURN.cloud = _TURN.errand = False
+            _TURN.cloud_failed = _TURN.errand_report = None
 
     def _chat_turn(self, body: bytes, lesson=None):
         try:
@@ -2304,6 +2448,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": "speaker refused", "reason": speaker_err},
                             status=400)
             return
+        _TURN.speaker = speaker
         # A caller reading a passage to the node may say so (`"reading": true`,
         # tools/reading_soak.py): a decline to a passage is not a refusal of a
         # question, and earns nothing.
@@ -3168,6 +3313,9 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/aetherseed/approvals":
             self._send_json(approvals_queue().view())
             return
+        if self.path == "/aetherseed/errands":
+            self._send_json(_errands_view())
+            return
         if self.path == "/aetherseed/records":
             # Her own account, checked now: each chained record.
             out = []
@@ -3229,6 +3377,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 "writing": ({"tokens": WRITING_TOKENS, "seconds": WRITING_SECONDS}
                             if WRITING_ENABLED else None),
                 "cloud": CLOUD.status(),
+                "errands": _errands_on(),
             })
             return
         if self.path == "/aetherseed/trust-record":
@@ -3730,6 +3879,19 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": str(e), "code": str(e)}, status=400)
                 return
             self._send_json({"cloud": CLOUD.status()})
+            return
+
+        if self.path == "/aetherseed/errands":
+            # The owner's connector settings (logic/connectors.py). The console
+            # lets only the owner here, and a password or a private calendar
+            # address only from the unit's own screen or its own Wi-Fi.
+            try:
+                req = json.loads(body or b"{}")
+                _errands_change(req if isinstance(req, dict) else {})
+            except ValueError as e:
+                self._send_json({"error": str(e), "code": str(e)}, status=400)
+                return
+            self._send_json(_errands_view())
             return
 
         if self.path in ("/api/chat", "/v1/chat/completions"):

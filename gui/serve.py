@@ -86,7 +86,9 @@ PROXIED_POST = ("/api/chat", "/aetherseed/setup", "/aetherseed/steward",
                 "/aetherseed/cog/start", "/aetherseed/cog/stop", "/aetherseed/cog/review",
                 "/aetherseed/cog/correct", "/aetherseed/cog/reflect", "/aetherseed/cog/forget",
                 # Claude with the owner's own key (logic/cloud.py)
-                "/aetherseed/cloud")
+                "/aetherseed/cloud",
+                # the owner's connectors for errands (logic/connectors.py)
+                "/aetherseed/errands")
 
 # THE STEWARD'S OWN SHELF. : "a file upload
 # button in the gui, that adds documents to the library/workspace". The body
@@ -263,8 +265,9 @@ OWNER_ONLY_POST = frozenset({
     "/aetherseed/brake", "/aetherseed/trust",                  # the brake; granting and lowering trust
     "/aetherseed/cog/start", "/aetherseed/cog/stop", "/aetherseed/cog/review",
     "/aetherseed/cog/correct", "/aetherseed/cog/reflect", "/aetherseed/cog/forget",
-    "/aetherseed/cloud"})
-OWNER_ONLY_GET = frozenset({"/aetherseed/training", "/aetherseed/cog", "/aetherseed/cog/essay"})
+    "/aetherseed/cloud", "/aetherseed/errands"})
+OWNER_ONLY_GET = frozenset({"/aetherseed/training", "/aetherseed/cog", "/aetherseed/cog/essay",
+                            "/aetherseed/errands"})
 SIGNIN_PATH = "/aetherseed/steward-signin"
 SIGNOUT_PATH = "/aetherseed/steward-signout"
 WHOAMI_PATH = "/aetherseed/whoami"
@@ -338,6 +341,8 @@ PROXIED_GET = ("/aetherseed/status", "/aetherseed/record", "/aetherseed/rings", 
                #her records checked; her workspace, read-only
                "/aetherseed/records", "/aetherseed/workspace", "/aetherseed/workspace/tree",
                "/aetherseed/approvals",
+               #the owner's connectors for errands, and the last errands
+               "/aetherseed/errands",
                #the conversation in progress, drawn again after a refresh -
                #the signed-in person's own proxy only (_backend)
                "/aetherseed/session",
@@ -1407,6 +1412,14 @@ class Console(http.server.SimpleHTTPRequestHandler):
             self._json(413, {"error": "That request is too large.", "code": "too_large"})
             return
         body = self.rfile.read(n) if n else b""
+        if self.path == "/aetherseed/errands" and b'"secret"' in body \
+                and not (self._own_screen() or self._on_own_wifi()):
+            # A mail password or a private calendar address crosses no network
+            # but the unit's own, as the Anthropic key does.
+            _tally("refused")
+            self._json(403, {"error": "Passwords and private addresses are set at the unit's own screen "
+                                      "or from its own Wi-Fi.", "code": "secret_on_unit_only"})
+            return
         if self.path == "/aetherseed/cloud" and b'"key"' in body \
                 and not (self._own_screen() or self._on_own_wifi()):
             # The Anthropic key crosses no network but the unit's own: typed
