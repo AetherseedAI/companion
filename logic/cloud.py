@@ -177,6 +177,51 @@ class Cloud:
         ctx = ssl.create_default_context()
         return urllib.request.urlopen(req, timeout=timeout, context=ctx)
 
+    def ask(self, system, turns, tools, max_tokens=MAX_TOKENS):
+        """One round of an errand (logic/errands.py): the Messages API with
+        tools, not streamed. Returns the response (content blocks and
+        stop_reason). Raises CloudError on anything that is not an answer.
+        Only while Claude is switched on, with the same key and model."""
+        key = self._key()
+        st = self.status()
+        if not st["on"]:
+            raise CloudError("not switched on")
+        body = {"model": st["model"], "max_tokens": int(max_tokens), "messages": turns}
+        if system:
+            body["system"] = system
+        if tools:
+            body["tools"] = tools
+        req = urllib.request.Request(API_URL, data=json.dumps(body).encode(), method="POST",
+                                     headers={"x-api-key": key,
+                                              "anthropic-version": API_VERSION,
+                                              "content-type": "application/json"})
+        try:
+            resp = self._open(req, TIMEOUT_S)
+        except urllib.error.HTTPError as e:
+            raise CloudError("HTTP %s" % e.code)
+        except Exception as e:
+            raise CloudError("unreachable: %s" % type(e).__name__)
+        try:
+            raw = resp.read(4 * 1048576 + 1)
+        except Exception as e:
+            raise CloudError("answer broke: %s" % type(e).__name__)
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+        if len(raw) > 4 * 1048576:
+            raise CloudError("answer too large")
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            raise CloudError("answer not JSON")
+        if not isinstance(data, dict) or data.get("type") == "error" or \
+                not isinstance(data.get("content"), list):
+            raise CloudError("error: %s" % ((data or {}).get("error") or {}).get("type", "?")
+                             if isinstance(data, dict) else "bad answer")
+        return data
+
     def stream(self, messages, on_text, writing=False):
         """Ask Claude; on_text(piece) for each piece as it comes. Returns the
         whole text. Raises CloudError on anything that is not an answer."""
