@@ -114,7 +114,7 @@ class Errands:
             pass
 
     # ---- one errand -----------------------------------------------------------
-    def run(self, request, speaker, level, system="", history=(), vault=False):
+    def run(self, request, speaker, level, system="", history=(), vault=False, plan=None):
         """Do one errand. Returns {"text", "steps", "done", "waiting", "failed"};
         raises CloudError when Claude cannot be asked at all (the caller then
         answers as before)."""
@@ -136,7 +136,8 @@ class Errands:
         turns.append({"role": "user", "content": request})
         steps, text = [], ""
         self._record({"action": "errand_started", "speaker": speaker or "", "level": level,
-                      "request": request[:300], "tools": sorted(tools)})
+                      "request": request[:300], "tools": sorted(tools),
+                      **({"plan": plan} if plan is not None else {})})
         for _ in range(MAX_STEPS + 1):
             resp = self.cloud.ask(sysprompt, turns, defs, max_tokens=MAX_TOKENS)
             blocks = resp.get("content") or []
@@ -242,6 +243,8 @@ def _brief(args):
 def _human(name, args):
     if name == "email_send":
         return "an email to %s, \"%s\"" % (args.get("to", "?"), str(args.get("subject", ""))[:60])
+    if name == "plan_create":
+        return "a standing plan every %s hours: \"%s\"" % (args.get("every_hours", "?"), str(args.get("goal", ""))[:80])
     if name in ("list_add", "list_remove"):
         return "%s %s on the %s list" % ("adding" if name == "list_add" else "removing",
                                          ", ".join(map(str, args.get("items") or []))[:80], args.get("name", "?"))

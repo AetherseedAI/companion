@@ -588,10 +588,12 @@ class Lists:
 
 def build(folder, **overrides):
     """The connectors of a unit, keyed by name. Tests hand in their own."""
+    from logic.plans import Plans       # plans use the connectors' kinds; imported here, not at the top
     s = Settings(folder)
     return s, {c.name: c for c in (
         overrides.get("web") or Web(s),
         overrides.get("calendar") or Calendar(s),
         overrides.get("email") or Email(s),
         overrides.get("lists") or Lists(s, folder),
+        overrides.get("plans") or Plans(s, folder),
     )}

@@ -994,6 +994,29 @@ def errand_now() -> bool:
     return bool(getattr(_TURN, "errand", False))
 
 
+PLAN_CHECK_S = 600
+
+
+def _plans_loop():
+    """Plans that run on (logic/plans.py): every ten minutes, run what is due.
+    Nothing runs while Claude is off or nothing is switched on."""
+    from logic import plans as plans_mod
+    while True:
+        time.sleep(PLAN_CHECK_S)
+        try:
+            e = errands_engine()
+            plans = e.connectors.get("plans")
+            if plans is None or e.settings.config("plans").get("on") is not True:
+                continue
+            level = getattr(getattr(spark, "gate", None), "trust_level", "observer")
+            ran = plans_mod.run_due(e, plans, level)      # Claude, not the chip: no model lock
+            for p in ran:
+                if p:
+                    print(f"[plans] plan {p['id']} ran: {p.get('status')}", flush=True)
+        except Exception as ex:
+            print(f"[plans] the check failed: {type(ex).__name__}", flush=True)
+
+
 # One request to the model at a time. Until only the chat path called
 # the model; now a ring's own sentence is asked for in the background too, and
 # what hailo-ollama does with two overlapping requests on one NPU has not been
@@ -1226,6 +1249,9 @@ def _errands_view():
     except OSError:
         pass
     view["recent"] = recent[-30:][::-1]
+    plans = e.connectors.get("plans")
+    view["plans"] = [p for p in (plans.run("plan_list", {}, {})["plans"] if plans else [])
+                     if p.get("status") != "removed"]
     view["claude_on"] = CLOUD.ready()
     return view
 
@@ -1253,6 +1279,13 @@ def _errands_change(req):
                 cfg[k] = v
         e.settings.set_config(name, cfg)
         print(f"[errands] the owner changed the {name} settings", flush=True)
+    elif act == "plan":
+        plans = e.connectors.get("plans")
+        try:
+            plans.set_status(int(req.get("id")), req.get("status"))
+        except (TypeError, ValueError, connectors_mod.ConnectorError):
+            raise ValueError("bad_plan")
+        print(f"[plans] the owner set plan {req.get('id')} {req.get('status')}", flush=True)
     elif act == "secret":
         if name not in ERRAND_SECRETS:
             raise ValueError("bad_secret")
@@ -4042,6 +4075,9 @@ def main():
         print(f"[cog] the COG-loop's token could not be written: {e!r}", flush=True)
 
     server = ThreadedHTTPServer((PROXY_BIND, PROXY_PORT), ProxyHandler)
+    # Plans that run on: checked every ten minutes; nothing runs unless the
+    # owner switched plans on and Claude is on (logic/plans.py).
+    threading.Thread(target=_plans_loop, daemon=True, name="plans").start()
 
     def _stop(signum, frame):
         # systemd stops the service with SIGTERM: leave the same way Ctrl+C does,

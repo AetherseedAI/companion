@@ -140,7 +140,8 @@ class TheRoutes(ErrandTurns):
         self.claude()
         view = self.get("/aetherseed/errands")
         names = {c["name"]: c for c in view["connectors"]}
-        self.assertEqual(set(names), {"web", "calendar", "email", "lists"})
+        self.assertEqual(set(names), {"web", "calendar", "email", "lists", "plans"})
+        self.assertEqual(view["plans"], [])
         self.assertTrue(names["email"]["on"])
         self.assertEqual(names["email"]["secrets"], {"email_password": True})
         self.assertNotIn("synthetic-not-real", json.dumps(view))

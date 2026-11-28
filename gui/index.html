@@ -240,6 +240,9 @@ textarea:focus{outline:none; border-color:var(--accent)}
 #errSec details{margin:10px 0}
 #errSec summary{cursor:pointer; font-weight:600}
 .errRecent{font-size:13px; color:var(--ink-2); padding-left:18px}
+.errPlan{border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:8px 0}
+.errPlan p{margin:4px 0}
+.errPlan .acts{display:flex; gap:8px; margin-top:6px}
 #cloudSec select, #cloudSec input[type=password]{width:100%; max-width:420px}
 .hint{max-width:760px; margin:8px auto 0; font-size:12px; color:var(--ink-3); display:flex; gap:14px; flex-wrap:wrap}
 /* The steward's brake: always in sight, one press to stop. */
@@ -875,6 +878,8 @@ button.chip:hover{color:var(--ink); border-color:var(--ink-3)}
         <input id="errCalUrl" type="password" autocomplete="off" spellcheck="false" maxlength="2000">
         <div class="row"><span id="errCalNow" class="help"></span><button type="button" class="send" id="errCalSave"></button></div>
       </details>
+      <h3 id="errPlansTitle" hidden></h3>
+      <div id="errPlans"></div>
       <p class="err" id="errError" hidden></p>
       <h3 id="errRecentTitle" hidden></h3>
       <ul class="errRecent" id="errRecent"></ul>
@@ -3400,7 +3405,7 @@ const T = {
     errTitle: 'Errands',
     errHelp: 'With Claude on, she can do errands with what you switch on here: read your calendar and inbox, read web pages, and keep the household lists. Anything that goes out, such as an email, is never done on her word: it waits under AetherSpark, “Waiting for your OK”, and is done exactly as written once you say yes. Every step is written down.',
     errNow: (d) => (d.claude_on ? '' : 'Claude is off, so no errands run. ') + `${d.today} of ${d.daily_limit} errands today; at most ${d.max_steps} steps each.`,
-    errConn: { web: 'Read web pages', calendar: 'Read your calendar', email: 'Email: read, and send with your yes', lists: 'Household lists' },
+    errConn: { web: 'Read web pages', calendar: 'Read your calendar', email: 'Email: read, and send with your yes', lists: 'Household lists', plans: 'Plans that run on (each one starts on your yes)' },
     errKind: { read: 'reads', write: 'changes at home', outward: 'goes out: waits for a yes' },
     errEmailTitle: 'Email account', errEmailHelp: 'IMAP to read, SMTP to send. For Proton, use Proton Mail Bridge on this unit (127.0.0.1). Gmail and Outlook need an app password. Mail servers are closed by her firewall until you open IMAP and SMTP for her.',
     errField: { address: 'Address', user: 'Login (if not the address)', imap_host: 'IMAP server', imap_port: 'IMAP port (993)', smtp_host: 'SMTP server', smtp_port: 'SMTP port (465 or 587)' },
@@ -3408,6 +3413,10 @@ const T = {
     errIsSet: 'Set.', errNotSet: 'Not set.',
     errCalTitle: 'Calendar', errCalLabel: 'Your calendar\'s private address (it begins with https and ends in .ics). Google, Outlook and Proton each offer one under the calendar\'s sharing settings. Anyone with it can read the calendar, so it is kept like a password.',
     errRecentTitle: 'Last errands',
+    errPlansTitle: 'Plans that run on',
+    errPlanLine: (p) => `${p.goal} — every ${p.every_hours} hours, for ${p.for || 'the household'}` + (p.status === 'paused' ? ' (paused' + (p.paused_because ? ': ' + p.paused_because : '') + ')' : ''),
+    errPlanReport: (p) => !p.last_report ? `Not run yet; next ${localWhen(p.next_at)}.` : p.last_report.failed ? `Last run failed: ${p.last_report.failed}` : `Last report ${localWhen(p.last_at)}: ${p.last_report.text || ''}` + ((p.last_report.waiting || []).length ? ` Waiting for your yes: ${p.last_report.waiting.join('; ')}.` : ''),
+    errPause: 'Pause', errResume: 'Resume', errRemove: 'Remove',
     errLine: (x) => ({ errand_started: `${localWhen(x.at)}: ${x.speaker || 'someone'} asked “${x.request || ''}”`,
                        errand_finished: `${localWhen(x.at)}: done ${x.done || 0}, waiting ${x.waiting || 0}, failed ${x.failed || 0}`,
                        tool_filed: `${localWhen(x.at)}: ${x.tool} filed as request ${x.request}`,
@@ -3670,7 +3679,7 @@ const T = {
     apApprove: 'Approve', apDecline: 'Decline',
     apTool: { todo_add: 'add to your to-do list', note_write: 'write a note',
               'errand:email_send': 'send an email', 'errand:list_add': 'add to a household list',
-              'errand:list_remove': 'remove from a household list' },
+              'errand:list_remove': 'remove from a household list', 'errand:plan_create': 'start a standing plan' },
     apLine: (r, tool) => `${tool}: “${apWords(r)}” — asked by ${r.speaker || 'someone'} ${localWhen(r.filed_at)}`,
     apStatus: { approved: 'approved', declined: 'declined', expired: 'expired',
                 failed: 'approved, not done' },
@@ -3841,7 +3850,7 @@ const T = {
     errTitle: 'Ærender',
     errHelp: 'Med Claude på kan hun gjøre ærender med det du slår på her: lese kalenderen og innboksen din, lese nettsider og føre husstandens lister. Det som går ut, som en e-post, gjøres aldri på hennes ord: det venter under AetherSpark, «Venter på ditt ja», og gjøres nøyaktig slik det står når du sier ja. Hvert steg skrives ned.',
     errNow: (d) => (d.claude_on ? '' : 'Claude er av, så ingen ærender kjøres. ') + `${d.today} av ${d.daily_limit} ærender i dag; høyst ${d.max_steps} steg hvert.`,
-    errConn: { web: 'Lese nettsider', calendar: 'Lese kalenderen din', email: 'E-post: lese, og sende med ditt ja', lists: 'Husstandens lister' },
+    errConn: { web: 'Lese nettsider', calendar: 'Lese kalenderen din', email: 'E-post: lese, og sende med ditt ja', lists: 'Husstandens lister', plans: 'Planer som går videre (hver starter på ditt ja)' },
     errKind: { read: 'leser', write: 'endrer hjemme', outward: 'går ut: venter på ja' },
     errEmailTitle: 'E-postkonto', errEmailHelp: 'IMAP for å lese, SMTP for å sende. For Proton, bruk Proton Mail Bridge på denne enheten (127.0.0.1). Gmail og Outlook trenger et app-passord. E-postserverne er stengt av brannmuren hennes til du åpner IMAP og SMTP for henne.',
     errField: { address: 'Adresse', user: 'Brukernavn (hvis ikke adressen)', imap_host: 'IMAP-server', imap_port: 'IMAP-port (993)', smtp_host: 'SMTP-server', smtp_port: 'SMTP-port (465 eller 587)' },
@@ -3849,6 +3858,10 @@ const T = {
     errIsSet: 'Satt.', errNotSet: 'Ikke satt.',
     errCalTitle: 'Kalender', errCalLabel: 'Kalenderens private adresse (den begynner med https og slutter på .ics). Google, Outlook og Proton har hver sin under kalenderens delingsinnstillinger. Alle som har den, kan lese kalenderen, så den holdes som et passord.',
     errRecentTitle: 'Siste ærender',
+    errPlansTitle: 'Planer som går videre',
+    errPlanLine: (p) => `${p.goal} — hver ${p.every_hours}. time, for ${p.for || 'husstanden'}` + (p.status === 'paused' ? ' (satt på pause' + (p.paused_because ? ': ' + p.paused_because : '') + ')' : ''),
+    errPlanReport: (p) => !p.last_report ? `Ikke kjørt ennå; neste ${localWhen(p.next_at)}.` : p.last_report.failed ? `Siste kjøring feilet: ${p.last_report.failed}` : `Siste rapport ${localWhen(p.last_at)}: ${p.last_report.text || ''}` + ((p.last_report.waiting || []).length ? ` Venter på ditt ja: ${p.last_report.waiting.join('; ')}.` : ''),
+    errPause: 'Pause', errResume: 'Fortsett', errRemove: 'Fjern',
     errLine: (x) => ({ errand_started: `${localWhen(x.at)}: ${x.speaker || 'noen'} ba om «${x.request || ''}»`,
                        errand_finished: `${localWhen(x.at)}: gjort ${x.done || 0}, venter ${x.waiting || 0}, feilet ${x.failed || 0}`,
                        tool_filed: `${localWhen(x.at)}: ${x.tool} lagt inn som forespørsel ${x.request}`,
@@ -4108,7 +4121,7 @@ const T = {
     apApprove: 'Godkjenn', apDecline: 'Avslå',
     apTool: { todo_add: 'legge til i gjøremålslisten', note_write: 'skrive et notat',
               'errand:email_send': 'sende en e-post', 'errand:list_add': 'legge til i en liste',
-              'errand:list_remove': 'fjerne fra en liste' },
+              'errand:list_remove': 'fjerne fra en liste', 'errand:plan_create': 'starte en fast plan' },
     apLine: (r, tool) => `${tool}: «${apWords(r)}» — bedt om av ${r.speaker || 'noen'} ${localWhen(r.filed_at)}`,
     apStatus: { approved: 'godkjent', declined: 'avslått', expired: 'utløpt',
                 failed: 'godkjent, ikke gjort' },
@@ -5400,6 +5413,7 @@ function apWords(r) {
   let a; try { a = JSON.parse(raw); } catch { return raw; }
   if (r.tool === 'errand:email_send') return `to ${a.to} · ${a.subject} · ${a.body}`;
   if (r.tool === 'errand:list_add' || r.tool === 'errand:list_remove') return `${(a.items || []).join(', ')} · ${a.name}`;
+  if (r.tool === 'errand:plan_create') return `${a.goal} · every ${a.every_hours} h`;
   return raw;
 }
 let errState = null;
@@ -5433,6 +5447,20 @@ function drawErrands() {
   $('errCalTitle').textContent = s.errCalTitle; $('errCalLabel').textContent = s.errCalLabel;
   $('errCalSave').textContent = s.errSave;
   $('errCalNow').textContent = cal.secrets.calendar_url ? s.errIsSet : s.errNotSet;
+  const plans = d.plans || [];
+  $('errPlansTitle').textContent = s.errPlansTitle; $('errPlansTitle').hidden = !plans.length;
+  $('errPlans').replaceChildren(...plans.map((p) => {
+    const box = document.createElement('div'); box.className = 'errPlan';
+    const g = document.createElement('p'); g.textContent = s.errPlanLine(p);
+    const rep = document.createElement('p'); rep.className = 'help';
+    rep.textContent = s.errPlanReport(p);
+    const acts = document.createElement('div'); acts.className = 'acts';
+    for (const [label, status] of (p.status === 'active' ? [[s.errPause, 'paused']] : [[s.errResume, 'active']]).concat([[s.errRemove, 'removed']])) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+      b.onclick = () => errPost({ action: 'plan', id: p.id, status }); acts.append(b);
+    }
+    box.append(g, rep, acts); return box;
+  }));
   const rec = d.recent || [];
   $('errRecentTitle').textContent = s.errRecentTitle; $('errRecentTitle').hidden = !rec.length;
   $('errRecent').replaceChildren(...rec.slice(0, 12).map((x) => {

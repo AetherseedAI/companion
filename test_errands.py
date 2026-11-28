@@ -9,7 +9,7 @@ import os
 import shutil
 import tempfile
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from logic import chain
 from logic.approvals import Approvals
@@ -338,3 +338,65 @@ class EmailReads(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlansThatRunOn(_Base):
+    def setUp(self):
+        super().setUp()
+        from logic.plans import Plans
+        self.now = [datetime(2026, 11, 28, 6, 0, tzinfo=timezone.utc)]
+        self.plans = Plans(self.settings, self.dir, clock=lambda: self.now[0])
+        self.connectors["plans"] = self.plans
+        self.settings.set_config("plans", {"on": True})
+
+    def test_a_plan_is_proposed_by_claude_and_starts_only_on_a_yes(self):
+        e = self.errands([use(("plan_create", {"goal": "Watch the shopping list and tell me when it runs low",
+                                               "every_hours": 24})), say("I have proposed it.")])
+        r = e.run("keep an eye on the shopping list", "sam", "autonomous")
+        self.assertEqual(self.plans.all(), [], "nothing runs on Claude's word")
+        self.assertIn("a standing plan every 24 hours", r["waiting"][0])
+        req = self.approvals.view()["pending"][0]
+        got, err = self.approvals.resolve(req["id"], True, "andreas", "yes", e.carry_out)
+        self.assertEqual(got["status"], "approved")
+        p = self.plans.all()[0]
+        self.assertEqual((p["goal"], p["every_hours"], p["for"], p["status"]),
+                         ("Watch the shopping list and tell me when it runs low", 24, "sam", "active"))
+
+    def test_a_due_plan_runs_as_an_errand_reports_and_waits_for_its_next_time(self):
+        from logic.plans import run_due
+        self.plans.create("Check the shopping list", 24, "sam")
+        e = self.errands([use(("list_read", {"name": "shopping"})), say("The shopping list is empty.")])
+        ran = run_due(e, self.plans, "writer")
+        self.assertEqual(len(ran), 1)
+        p = self.plans.all()[0]
+        self.assertEqual(p["last_report"]["text"], "The shopping list is empty.")
+        self.assertEqual(p["next_at"], "2026-11-29T06:00:00+00:00")
+        self.assertIn("standing plan you agreed to keep working on for sam", self.cloud.asked[0]["turns"][-1]["content"])
+        self.assertEqual(run_due(e, self.plans, "writer"), [], "not due again until tomorrow")
+        self.now[0] = datetime(2026, 11, 29, 6, 1, tzinfo=timezone.utc)
+        e2 = self.errands([say("Still empty.")])
+        run_due(e2, self.plans, "writer")
+        self.assertIn("Last time you reported: The shopping list is empty.", self.cloud.asked[0]["turns"][-1]["content"])
+
+    def test_nothing_runs_with_claude_off_and_three_failures_pause_a_plan(self):
+        from logic.plans import run_due, FAILS_TO_PAUSE
+        self.plans.create("Check things", 6, "sam")
+        self.assertEqual(run_due(self.errands([], on=False), self.plans, "writer"), [])
+        self.assertEqual(self.plans.all()[0]["runs"], 0, "Claude off counts nothing against the plan")
+        for i in range(FAILS_TO_PAUSE):
+            run_due(self.errands([CloudError("HTTP 529")]), self.plans, "writer")
+            self.now[0] += timedelta(hours=7)
+        p = self.plans.all()[0]
+        self.assertEqual(p["status"], "paused")
+        self.assertIn("failed 3 times in a row: HTTP 529", p["paused_because"])
+
+    def test_limits_on_a_plan(self):
+        for goal, hours in (("", 24), ("x" * 700, 24), ("ok", 1), ("ok", 24 * 30), ("ok", "often")):
+            with self.assertRaises(ConnectorError):
+                self.plans.create(goal, hours, "sam")
+        self.plans.create("ok", 6, "sam")
+        self.plans.set_status(1, "paused")
+        self.assertEqual(self.plans.due(), [])
+        self.plans.set_status(1, "removed")
+        with self.assertRaises(ConnectorError):
+            self.plans.set_status(1, "active")
